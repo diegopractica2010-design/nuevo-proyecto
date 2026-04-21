@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Radar de Precios | Comparador real de supermercado</title>
+    <meta
+      name="description"
+      content="Compara precios reales de Lider, filtra, ordena, guarda favoritos e historial en una experiencia moderna tipo ecommerce."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="masthead">
+        <div class="topbar">
+          <a class="brand" href="/">
+            <span class="brand__mark">RP</span>
+            <span>
+              <strong>Radar de Precios</strong>
+              <small>Comparador operativo con datos reales</small>
+            </span>
+          </a>
+          <nav class="nav">
+            <a href="/" class="nav-link">Buscar</a>
+            <a href="#baskets" class="nav-link" id="baskets-link">Canastas</a>
+          </nav>
+          <div class="topbar__meta">
+            <span class="topbar__pill">Lider.cl y Jumbo.cl en vivo</span>
+            <span class="topbar__pill topbar__pill--ghost">Frontend ecommerce responsive</span>
+          </div>
+        </div>
+
+        <section class="hero">
+          <div class="hero__copy">
+            <p class="eyebrow">Comparador tipo canasta</p>
+            <h1>Busca, ordena y detecta el mejor precio sin salir de una sola pantalla.</h1>
+            <p class="hero__text">
+              El buscador consulta productos reales de Lider y Jumbo, construye una vista limpia para
+              comparar y te deja seguir favoritos e historial desde el navegador.
+            </p>
+
+            <form id="search-form" class="search-form">
+              <label for="search-input" class="sr-only">Buscar producto</label>
+              <input
+                id="search-input"
+                type="search"
+                autocomplete="off"
+                placeholder="Busca leche, arroz, cafe, detergente..."
+                required
+              />
+              <select id="store-select">
+                <option value="lider">Líder</option>
+                <option value="jumbo">Jumbo</option>
+              </select>
+              <button id="search-button" type="submit">Buscar</button>
+            </form>
+
+            <div class="quick-links">
+              <span class="quick-links__label">Atajos</span>
+              <div id="quick-tags" class="chip-row"></div>
+            </div>
+          </div>
+
+          <div class="hero__cards">
+            <article class="hero-stat">
+              <span class="hero-stat__label">Resultados</span>
+              <strong id="hero-results-count">0</strong>
+              <small>Productos listos para comparar</small>
+            </article>
+            <article class="hero-stat">
+              <span class="hero-stat__label">Mejor precio</span>
+              <strong id="hero-cheapest">-</strong>
+              <small>Se actualiza con cada busqueda</small>
+            </article>
+            <article class="hero-stat">
+              <span class="hero-stat__label">Favoritos</span>
+              <strong id="favorites-count">0</strong>
+              <small>Guardados en localStorage</small>
+            </article>
+            <article class="hero-stat">
+              <span class="hero-stat__label">Historial</span>
+              <strong id="history-count">0</strong>
+              <small>Ultimas busquedas reutilizables</small>
+            </article>
+          </div>
+        </section>
+      </header>
+
+      <main class="layout">
+        <aside class="sidebar">
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="eyebrow eyebrow--small">Control</p>
+                <h2>Filtros</h2>
+              </div>
+              <button id="clear-filters-button" class="text-button" type="button">Limpiar</button>
+            </div>
+
+            <div class="filter-group">
+              <label for="sort-select">Ordenar por</label>
+              <select id="sort-select">
+                <option value="price-asc">Menor precio</option>
+                <option value="relevance">Relevancia</option>
+                <option value="price-desc">Mayor precio</option>
+                <option value="savings-desc">Mayor ahorro</option>
+                <option value="name-asc">Nombre A-Z</option>
+              </select>
+            </div>
+
+            <div class="filter-grid">
+              <div class="filter-group">
+                <label for="min-price-input">Precio minimo</label>
+                <input id="min-price-input" type="number" min="0" placeholder="0" />
+              </div>
+              <div class="filter-group">
+                <label for="max-price-input">Precio maximo</label>
+                <input id="max-price-input" type="number" min="0" placeholder="Sin tope" />
+              </div>
+            </div>
+
+            <div class="toggle-list">
+              <label class="toggle">
+                <input id="offers-toggle" type="checkbox" />
+                <span>Solo ofertas</span>
+              </label>
+              <label class="toggle">
+                <input id="stock-toggle" type="checkbox" />
+                <span>Solo con stock</span>
+              </label>
+              <label class="toggle">
+                <input id="favorites-toggle" type="checkbox" />
+                <span>Solo favoritos</span>
+              </label>
+            </div>
+
+            <div class="filter-group">
+              <span class="filter-label">Marca</span>
+              <div id="brand-filters" class="chip-row chip-row--stacked"></div>
+            </div>
+
+            <div class="filter-group">
+              <span class="filter-label">Categoria</span>
+              <div id="category-filters" class="chip-row chip-row--stacked"></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="eyebrow eyebrow--small">Guardado</p>
+                <h2>Favoritos</h2>
+              </div>
+              <button id="clear-favorites-button" class="text-button" type="button">Vaciar</button>
+            </div>
+            <div id="favorites-list" class="saved-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <p class="eyebrow eyebrow--small">Memoria</p>
+                <h2>Historial</h2>
+              </div>
+              <button id="clear-history-button" class="text-button" type="button">Borrar</button>
+            </div>
+            <div id="history-list" class="saved-list"></div>
+          </section>
+        </aside>
+
+        <section class="content">
+          <section class="panel panel--soft result-head">
+            <div>
+              <p class="eyebrow eyebrow--small">Comparador funcional</p>
+              <h2 id="results-title">Explorando precios reales</h2>
+              <p id="results-subtitle" class="muted-text">
+                Cargando una primera busqueda real para mostrar el comparador en accion.
+              </p>
+            </div>
+            <div class="pill-row">
+              <span id="status-pill" class="pill">Esperando datos</span>
+              <span id="source-pill" class="pill pill--ghost">Lider</span>
+            </div>
+          </section>
+
+          <section id="feedback" class="feedback-stack"></section>
+          <section id="suggestions" class="suggestions-bar"></section>
+          <section id="summary-cards" class="summary-grid"></section>
+
+          <section class="toolbar">
+            <div class="toolbar__meta">
+              <strong id="visible-count">0 productos</strong>
+              <span id="active-filters-label" class="muted-text">Sin filtros activos</span>
+            </div>
+            <a id="source-link" class="source-link" href="#" target="_blank" rel="noreferrer">
+              Ver fuente en Lider
+            </a>
+          </section>
+
+          <section id="results-grid" class="results-grid" aria-live="polite"></section>
+        </section>
+      </main>
+
+      <!-- Sección de Canastas -->
+      <section id="baskets-section" class="baskets-section" style="display: none;">
+        <div class="shell">
+          <header class="section-header">
+            <h1>Canastas de Compras</h1>
+            <button id="new-basket-btn" class="btn btn--primary">Nueva Canasta</button>
+          </header>
+
+          <div id="baskets-list" class="baskets-list"></div>
+
+          <div id="basket-detail" class="basket-detail" style="display: none;">
+            <header class="basket-header">
+              <h2 id="basket-title"></h2>
+              <button id="back-to-baskets" class="btn btn--secondary">← Volver</button>
+            </header>
+            <div id="basket-items" class="basket-items"></div>
+            <div id="basket-total" class="basket-total"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

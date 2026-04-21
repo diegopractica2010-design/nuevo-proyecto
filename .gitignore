@@ -1,0 +1,38 @@
+# Entorno virtual
+venv/
+env/
+ENV/
+
+# Archivos temporales
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Distribución
+dist/
+build/
+*.egg-info/
+
+# Node modules (si se agrega JS)
+node_modules/

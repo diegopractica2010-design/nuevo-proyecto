@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "radar-precios"
+version = "3.0.0"
+description = "Comparador de precios de supermercados chilenos"
+authors = [
+    {name = "Desarrollador", email = "dev@example.com"}
+]
+dependencies = [
+    "fastapi>=0.136.0",
+    "uvicorn>=0.44.0",
+    "requests>=2.33.0",
+    "beautifulsoup4>=4.14.0",
+    "pydantic>=2.13.0"
+]
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.0",
+    "httpx>=0.25.0",
+    "black>=24.0.0",
+    "flake8>=7.0.0"
+]
+
+[tool.setuptools]
+packages = ["backend"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503"]
