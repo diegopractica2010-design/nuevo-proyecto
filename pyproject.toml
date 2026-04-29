@@ -15,7 +15,10 @@ dependencies = [
     "requests>=2.33.0",
     "beautifulsoup4>=4.14.0",
     "pydantic>=2.13.0",
+    "pydantic-settings>=2.0.0",
     "sqlalchemy>=2.0.0",
+    "redis[hiredis]>=5.0.0",
+    "prometheus-client>=0.17.0",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "bcrypt<5"
@@ -31,7 +34,20 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["backend"]
+packages = [
+    "backend",
+    "backend.api",
+    "backend.api.routes",
+    "backend.application",
+    "backend.application.use_cases",
+    "backend.domain",
+    "backend.domain.normalization",
+    "backend.infrastructure",
+    "backend.infrastructure.cache",
+    "backend.infrastructure.db",
+    "backend.infrastructure.scrapers",
+    "backend.tasks",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

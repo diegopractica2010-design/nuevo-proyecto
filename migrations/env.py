@@ -8,6 +8,7 @@ from sqlalchemy import engine_from_config, pool
 from backend.config import DATABASE_URL
 from backend.db import Base
 from backend import db_models  # noqa: F401
+from backend.infrastructure.db import models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", DATABASE_URL)

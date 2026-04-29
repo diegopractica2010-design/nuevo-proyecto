@@ -20,7 +20,7 @@ celery_app = Celery(
     "radar_precios",
     broker=CELERY_BROKER_URL,
     backend=CELERY_RESULT_BACKEND,
-    include=["backend.tasks"],
+    include=["backend.tasks", "backend.tasks.scrape_tasks"],
 )
 
 # Configure Celery
@@ -37,6 +37,7 @@ celery_app.conf.update(
     worker_max_tasks_per_child=1000,  # Recycle worker after 1000 tasks
     broker_connection_retry_on_startup=True,
     broker_connection_retry=True,
+    broker_connection_timeout=1,
     broker_connection_max_retries=10,
 )
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import logging
+from threading import Thread
 from threading import Lock
 
 from backend.config import CACHE_TTL_SECONDS, MAX_RESULTS, STALE_CACHE_TTL_SECONDS
@@ -14,8 +16,13 @@ from backend.models import (
     SearchResponse,
     SearchStats,
 )
-from backend.scraper import NoResultsError, ScraperError, normalize_query, search_lider
+from backend.scraper import normalize_query
 from backend.store_adapters import get_store_adapter
+from backend.tasks import search_jumbo_async
+from backend.tasks.scrape_tasks import scrape_lider
+
+
+logger = logging.getLogger(__name__)
 
 
 class SearchServiceError(RuntimeError):
@@ -147,56 +154,39 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
         return cached
 
     stale = _get_cache(store, normalized_query, limit, allow_stale=True)
+    _enqueue_scrape(store, normalized_query, limit)
+    if stale and stale.results:
+        stale.warning = (
+            f"Actualizacion de {store.title()} encolada. "
+            "Se muestran resultados recientes desde cache."
+        )
+        return stale
 
+    return _empty_response(
+        normalized_query,
+        warning=(
+            f"Busqueda encolada para {store.title()}. "
+            "Los precios se actualizaran en segundo plano."
+        ),
+    )
+
+
+def _enqueue_scrape(store: str, query: str, limit: int) -> None:
+    task = scrape_lider if store == "lider" else search_jumbo_async
+    _start_publish_thread(task, query, limit)
+
+
+def _start_publish_thread(task, query: str, limit: int) -> None:
+    thread = Thread(
+        target=_publish_scrape_task,
+        args=(task, query, limit),
+        daemon=True,
+    )
+    thread.start()
+
+
+def _publish_scrape_task(task, query: str, limit: int) -> None:
     try:
-        if adapter.name == "lider":
-            scraped = search_lider(normalized_query, limit=limit)
-        else:
-            scraped = adapter.search(normalized_query, limit)
-
-        products = [Product.model_validate({**product, "source": store}) for product in scraped.products[:limit]]
-        response = SearchResponse(
-            query=normalized_query,
-            applied_query=scraped.applied_query,
-            count=len(products),
-            results=products,
-            facets=_build_facets(products),
-            stats=_build_stats(products),
-            suggestions=scraped.suggestions,
-            fetched_at=datetime.now(UTC).isoformat(),
-            source_url=scraped.source_url,
-            strategy=f"{scraped.fetch_strategy}/{scraped.parse_strategy}",
-            cached=False,
-            warning=scraped.warning,
-        )
-        _set_cache(store, normalized_query, limit, response)
-
-        # Grabar historial de precios
-        for product in products:
-            from backend.basket_service import PriceHistoryService
-            PriceHistoryService.record_price(
-                product_id=product.id or product.name,
-                store=store,
-                price=product.price,
-                url=product.url
-            )
-
-        return response
-    except NoResultsError as exc:
-        return _empty_response(
-            normalized_query,
-            suggestions=exc.suggestions,
-            warning=f'No encontramos productos para "{normalized_query}" en {store.title()}.',
-        )
-    except ScraperError as exc:
-        if stale and stale.results:
-            stale.warning = (
-                f"No fue posible refrescar {store.title()} en este momento. "
-                "Se muestran resultados recientes desde cache."
-            )
-            return stale
-
-        raise SearchServiceError(
-            f"No fue posible obtener resultados reales de {store.title()} en este momento. "
-            "Intenta nuevamente en unos segundos."
-        ) from exc
+        task.apply_async(args=(query,), kwargs={"limit": limit}, retry=False)
+    except Exception as exc:
+        logger.warning("Failed to publish scrape task for query=%s: %s", query, exc)

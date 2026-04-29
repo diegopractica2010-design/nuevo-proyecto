@@ -1,0 +1,2 @@
+"""Product normalization primitives."""
+
