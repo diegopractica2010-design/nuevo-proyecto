@@ -1,59 +1,71 @@
 from __future__ import annotations
 
 import os
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from backend.config import REQUEST_TIMEOUT
+from backend.db import SessionLocal
+from backend.db_models import UserRecord
+from backend.repositories import UserRepository
 
 
-# Configuración JWT
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+def _get_secret_key() -> str:
+    """Obtener SECRET_KEY desde entorno o generar una nueva."""
+    secret = os.getenv("SECRET_KEY")
+    if secret:
+        if len(secret) < 32:
+            raise ValueError("SECRET_KEY debe tener al menos 32 caracteres")
+        return secret
+    
+    # Generar clave segura si no existe (para desarrollo)
+    generated = secrets.token_hex(32)
+    return generated
+
+
+SECRET_KEY = _get_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-class User:
-    def __init__(self, username: str, email: str, hashed_password: str):
-        self.username = username
-        self.email = email
-        self.hashed_password = hashed_password
-        self.created_at = datetime.now()
-        self.is_active = True
-
-
-# Almacenamiento en memoria (para desarrollo)
-_USERS: dict[str, User] = {}
-
-
 class AuthService:
     @staticmethod
-    def create_user(username: str, email: str, password: str) -> User:
-        if username in _USERS:
-            raise ValueError("Username already exists")
+    def create_user(username: str, email: str, password: str) -> UserRecord:
+        with SessionLocal() as session:
+            users = UserRepository(session)
+            if users.get_by_username(username):
+                raise ValueError("Username already exists")
+            if users.get_by_email(email):
+                raise ValueError("Email already exists")
 
-        hashed_password = pwd_context.hash(password)
-        user = User(username, email, hashed_password)
-        _USERS[username] = user
-        return user
-
-    @staticmethod
-    def authenticate_user(username: str, password: str) -> Optional[User]:
-        user = _USERS.get(username)
-        if not user:
-            return None
-        if not pwd_context.verify(password, user.hashed_password):
-            return None
-        return user
+            user = users.create(username, email, pwd_context.hash(password))
+            session.commit()
+            session.refresh(user)
+            return user
 
     @staticmethod
-    def get_user(username: str) -> Optional[User]:
-        return _USERS.get(username)
+    def authenticate_user(username: str, password: str) -> Optional[UserRecord]:
+        with SessionLocal() as session:
+            user = UserRepository(session).get_by_username(username)
+            if not user:
+                return None
+            if not pwd_context.verify(password, user.hashed_password):
+                return None
+            session.expunge(user)
+            return user
+
+    @staticmethod
+    def get_user(username: str) -> Optional[UserRecord]:
+        with SessionLocal() as session:
+            user = UserRepository(session).get_by_username(username)
+            if user:
+                session.expunge(user)
+            return user
 
 
 class TokenService:

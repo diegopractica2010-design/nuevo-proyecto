@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 from unicodedata import normalize as unicode_normalize
 from urllib.parse import quote_plus
 
@@ -14,21 +13,9 @@ from backend.config import (
     JUMBO_PRODUCT_BASE_URL,
     JUMBO_SEARCH_URL,
     REQUEST_TIMEOUT,
-    SUGGESTION_FALLBACK_LIMIT,
 )
 from backend.parser import parse_catalog_page
-
-
-class ScraperError(RuntimeError):
-    pass
-
-
-class NoResultsError(ScraperError):
-    def __init__(self, query: str, *, attempts: list[str] | None = None, suggestions: list[str] | None = None):
-        super().__init__(f'No se encontraron productos para "{query}"')
-        self.query = query
-        self.attempts = attempts or []
-        self.suggestions = suggestions or []
+from backend.scraper import NoResultsError
 
 
 @dataclass(slots=True)
@@ -66,32 +53,32 @@ def _execute_catalog_query(session: requests.Session, query: str, limit: int) ->
     """Execute a catalog search query for Jumbo."""
     url = JUMBO_SEARCH_URL.format(query=quote_plus(query))
 
+    attempts: list[str] = []
+
     for profile_name, headers in HTML_HEADER_PROFILES:
         try:
             response = session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
-            search_page = SearchPage(
-                query=query,
-                html=response.text,
-                url=url,
-                strategy=f"search:{profile_name}",
+            parsed = parse_catalog_page(
+                response.text,
+                limit=limit,
+                base_url=JUMBO_PRODUCT_BASE_URL,
             )
-
-            products = parse_catalog_page(search_page, limit=limit, base_url=JUMBO_PRODUCT_BASE_URL)
-            if products:
+            if parsed.products:
                 return ScrapedSearchResult(
                     query=query,
                     applied_query=query,
-                    products=products,
-                    source_url=url,
+                    products=parsed.products,
+                    source_url=response.url,
                     fetch_strategy=f"search:{profile_name}",
-                    parse_strategy="next_data",  # Assuming similar structure to Lider
+                    parse_strategy=parsed.parser or "unknown",
                 )
         except Exception as exc:
+            attempts.append(f"search:{profile_name}: {exc}")
             continue
 
-    raise NoResultsError(query)
+    raise NoResultsError(query, attempts=attempts)
 
 
 def search_jumbo(query: str, limit: int = 24) -> ScrapedSearchResult:

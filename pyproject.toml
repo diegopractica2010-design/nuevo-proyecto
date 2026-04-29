@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "radar-precios"
-version = "3.0.0"
+version = "0.1.0"
 description = "Comparador de precios de supermercados chilenos"
 authors = [
     {name = "Desarrollador", email = "dev@example.com"}
@@ -14,7 +14,11 @@ dependencies = [
     "uvicorn>=0.44.0",
     "requests>=2.33.0",
     "beautifulsoup4>=4.14.0",
-    "pydantic>=2.13.0"
+    "pydantic>=2.13.0",
+    "sqlalchemy>=2.0.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt<5"
 ]
 requires-python = ">=3.10"
 

@@ -1,0 +1,130 @@
+version: '3.9'
+
+services:
+  # Redis - Cache + Task Queue Broker
+  redis:
+    image: redis:7-alpine
+    container_name: radar-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis123}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - radar-network
+
+  # PostgreSQL - Main Database (optional, for Fase C)
+  postgres:
+    image: postgres:16-alpine
+    container_name: radar-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-radar_precios}
+      POSTGRES_USER: ${POSTGRES_USER:-radar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-radar123}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radar}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - radar-network
+
+  # FastAPI Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: radar-app
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://radar:radar123@postgres:5432/radar_precios}
+      REDIS_URL: ${REDIS_URL:-redis://:redis123@redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:redis123@redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:redis123@redis:6379/2}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8001
+    networks:
+      - radar-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Celery Worker - Scraping Tasks
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: radar-celery-worker
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://radar:radar123@postgres:5432/radar_precios}
+      REDIS_URL: ${REDIS_URL:-redis://:redis123@redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:redis123@redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:redis123@redis:6379/2}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: python -m celery -A backend.celery_app worker --loglevel=info --concurrency=4
+    networks:
+      - radar-network
+
+  # Celery Beat - Scheduled Tasks
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: radar-celery-beat
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://radar:radar123@postgres:5432/radar_precios}
+      REDIS_URL: ${REDIS_URL:-redis://:redis123@redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:redis123@redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:redis123@redis:6379/2}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: python -m celery -A backend.celery_app beat --loglevel=info
+    networks:
+      - radar-network
+
+volumes:
+  redis_data:
+  postgres_data:
+
+networks:
+  radar-network:
+    driver: bridge

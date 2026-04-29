@@ -2,3 +2,42 @@ fastapi
 uvicorn
 requests
 beautifulsoup4
+pydantic
+pydantic-settings
+sqlalchemy
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt<5
+
+# FASE A: Core Infrastructure
+redis[hiredis]>=5.0.0
+celery[redis]>=5.3.0
+python-multipart
+
+# FASE A: Monitoring & Logging
+sentry-sdk[fastapi,sqlalchemy]
+python-json-logger
+
+# FASE A: Database Extensions
+psycopg2-binary
+alembic
+
+# FASE 4: Metrics & Monitoring
+prometheus-client>=0.17.0
+
+# FASE 4: Cloud & Storage
+boto3>=1.26.0
+
+# FASE 4: Async & Utilities
+aiofiles
+python-dotenv
+
+# Development & Testing (optional)
+pytest>=9.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
+httpx>=0.25.0
+black>=24.0.0
+flake8>=7.0.0
+mypy>=1.0.0
+

@@ -153,6 +153,23 @@ class ParseProductsTests(unittest.TestCase):
             "https://super.lider.cl/ip/leche/leche-natural-entera-caja/00040000720074",
         )
 
+    def test_parse_catalog_page_uses_custom_base_url_for_relative_links(self):
+        html = """
+        <html>
+          <body>
+            <article>
+              <a href="/producto/leche-jumbo">Leche Jumbo 1 L</a>
+              <span class="price">$1.250</span>
+            </article>
+          </body>
+        </html>
+        """
+
+        parsed = parse_catalog_page(html, base_url="https://www.jumbo.cl")
+
+        self.assertEqual(len(parsed.products), 1)
+        self.assertEqual(parsed.products[0]["url"], "https://www.jumbo.cl/producto/leche-jumbo")
+
 
 if __name__ == "__main__":
     unittest.main()

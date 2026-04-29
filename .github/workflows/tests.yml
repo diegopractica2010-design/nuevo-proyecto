@@ -1,0 +1,120 @@
+name: Tests & Lint
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: radar_precios_test
+          POSTGRES_USER: radar
+          POSTGRES_PASSWORD: test123
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://radar:test123@localhost:5432/radar_precios_test
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      ENVIRONMENT: test
+      JWT_SECRET_KEY: test-secret-key-for-tests-only
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Lint with flake8
+      run: |
+        # Mostrar todas las infracciones
+        flake8 backend tests --count --show-source --statistics
+      continue-on-error: true
+    
+    - name: Format check with black
+      run: |
+        black --check backend tests
+      continue-on-error: true
+    
+    - name: Run pytest
+      run: |
+        pytest tests/ -v --cov=backend --cov-report=xml --cov-report=html
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+      continue-on-error: true
+
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Run Bandit security checks
+      run: |
+        pip install bandit
+        bandit -r backend -f json -o bandit-report.json
+      continue-on-error: true
+    
+    - name: Check for secrets
+      run: |
+        pip install detect-secrets
+        detect-secrets scan --baseline .secrets.baseline
+      continue-on-error: true
+
+  type-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install mypy
+    
+    - name: Run mypy
+      run: mypy backend --ignore-missing-imports
+      continue-on-error: true

@@ -119,6 +119,46 @@ a {
   border-radius: var(--radius-lg);
 }
 
+.auth-box {
+  display: grid;
+  grid-template-columns: minmax(92px, 1fr) minmax(130px, 1.3fr) minmax(92px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  max-width: 620px;
+}
+
+.auth-box input {
+  min-height: 38px;
+  width: 100%;
+  border: 1px solid rgba(48, 57, 46, 0.1);
+  border-radius: var(--radius-sm);
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.auth-box__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.auth-box button,
+.btn {
+  min-height: 38px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--forest);
+  color: #fff;
+  font-weight: 800;
+}
+
+.auth-box__status {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .brand {
   display: inline-flex;
   align-items: center;
@@ -747,6 +787,101 @@ a {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.section-header,
+.section-header__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.baskets-section {
+  margin-top: 24px;
+}
+
+.baskets-list,
+.basket-items {
+  display: grid;
+  gap: 14px;
+}
+
+.basket-card,
+.basket-item,
+.basket-total {
+  padding: 18px;
+  border: 1px solid var(--surface-line);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+}
+
+.basket-card {
+  cursor: pointer;
+}
+
+.basket-meta,
+.basket-item,
+.basket-item__price,
+.basket-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.basket-item {
+  justify-content: space-between;
+}
+
+.basket-actions input {
+  width: 76px;
+  min-height: 38px;
+  padding: 0 8px;
+  border: 1px solid var(--surface-line);
+  border-radius: var(--radius-sm);
+}
+
+.btn--ghost {
+  background: rgba(36, 91, 77, 0.1);
+  color: var(--forest);
+}
+
+.price-history {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--surface-line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.price-history[hidden] {
+  display: none;
+}
+
+.price-history__summary,
+.price-history__list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.price-history__summary span,
+.price-history__list span {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.price-history__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
 }
 
 .action-link {
@@ -858,6 +993,13 @@ a {
 
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 960px) {
+  .auth-box {
+    width: 100%;
+    grid-template-columns: 1fr 1fr;
   }
 }
 

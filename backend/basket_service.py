@@ -2,120 +2,163 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Optional
 
+from backend.db import SessionLocal
+from backend.db_models import BasketItemRecord, BasketRecord, PriceHistoryRecord
 from backend.models_baskets import Basket, BasketItem, BasketSummary, PriceHistory
+from backend.repositories import BasketRepository, PriceHistoryRepository
 
 
-# Almacenamiento en memoria (para desarrollo)
-_BASKETS: Dict[str, Basket] = {}
-_PRICE_HISTORY: Dict[str, List[PriceHistory]] = {}
+def _to_basket_item(record: BasketItemRecord) -> BasketItem:
+    return BasketItem(
+        product_id=record.product_id,
+        name=record.name,
+        price=record.price,
+        quantity=record.quantity,
+        store=record.store,
+        added_at=record.added_at,
+    )
+
+
+def _to_basket(record: BasketRecord) -> Basket:
+    return Basket(
+        id=record.id,
+        name=record.name,
+        user_id=record.user_id,
+        items=[_to_basket_item(item) for item in record.items],
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def _to_price_history(record: PriceHistoryRecord) -> PriceHistory:
+    return PriceHistory(
+        product_id=record.product_id,
+        store=record.store,
+        price=record.price,
+        date=record.date,
+        url=record.url,
+    )
 
 
 class BasketService:
     @staticmethod
     def create_basket(name: str, user_id: Optional[str] = None) -> Basket:
-        basket_id = str(uuid.uuid4())
-        basket = Basket(
-            id=basket_id,
-            name=name,
-            user_id=user_id,
-            items=[],
-            created_at=datetime.now(),
-            updated_at=datetime.now()
-        )
-        _BASKETS[basket_id] = basket
-        return basket
+        with SessionLocal() as session:
+            basket = BasketRepository(session).create(str(uuid.uuid4()), name, user_id)
+            session.commit()
+            session.refresh(basket)
+            return _to_basket(basket)
 
     @staticmethod
     def get_basket(basket_id: str) -> Optional[Basket]:
-        return _BASKETS.get(basket_id)
+        with SessionLocal() as session:
+            basket = BasketRepository(session).get(basket_id)
+            return _to_basket(basket) if basket else None
 
     @staticmethod
-    def get_user_baskets(user_id: Optional[str] = None) -> List[BasketSummary]:
-        baskets = []
-        for basket in _BASKETS.values():
-            if user_id is None or basket.user_id == user_id:
-                total_price = sum(item.price * item.quantity for item in basket.items)
-                stores = list(set(item.store for item in basket.items))
-                baskets.append(BasketSummary(
+    def get_user_baskets(user_id: Optional[str] = None) -> list[BasketSummary]:
+        with SessionLocal() as session:
+            records = BasketRepository(session).list_for_user(user_id)
+
+        summaries: list[BasketSummary] = []
+        for basket in records:
+            total_price = sum(item.price * item.quantity for item in basket.items)
+            stores = sorted({item.store for item in basket.items})
+            summaries.append(
+                BasketSummary(
                     id=basket.id,
                     name=basket.name,
                     item_count=len(basket.items),
                     total_price=total_price,
                     stores=stores,
-                    created_at=basket.created_at
-                ))
-        return sorted(baskets, key=lambda x: x.created_at, reverse=True)
+                    created_at=basket.created_at,
+                )
+            )
+        return sorted(summaries, key=lambda item: item.created_at, reverse=True)
 
     @staticmethod
     def add_to_basket(basket_id: str, product_data: dict, quantity: int = 1) -> bool:
-        basket = _BASKETS.get(basket_id)
-        if not basket:
-            return False
+        product_id = str(product_data.get("id") or product_data.get("sku") or product_data.get("url") or "")
+        if not product_id:
+            product_id = str(product_data.get("name") or "")
 
-        # Verificar si el producto ya está en la canasta
-        existing_item = None
-        for item in basket.items:
-            if item.product_id == product_data.get('id'):
-                existing_item = item
-                break
+        with SessionLocal() as session:
+            baskets = BasketRepository(session)
+            basket = baskets.get(basket_id)
+            if not basket:
+                return False
 
-        if existing_item:
-            existing_item.quantity += quantity
-        else:
-            item = BasketItem(
-                product_id=product_data.get('id', ''),
-                name=product_data.get('name', ''),
-                price=product_data.get('price', 0),
+            baskets.add_item(
+                basket,
+                product_id=product_id,
+                name=str(product_data.get("name") or ""),
+                price=float(product_data.get("price") or 0),
                 quantity=quantity,
-                store=product_data.get('source', 'lider')
+                store=str(product_data.get("source") or "lider"),
             )
-            basket.items.append(item)
-
-        basket.updated_at = datetime.now()
-        return True
+            session.commit()
+            return True
 
     @staticmethod
     def remove_from_basket(basket_id: str, product_id: str) -> bool:
-        basket = _BASKETS.get(basket_id)
-        if not basket:
-            return False
+        with SessionLocal() as session:
+            baskets = BasketRepository(session)
+            basket = baskets.get(basket_id)
+            if not basket:
+                return False
 
-        basket.items = [item for item in basket.items if item.product_id != product_id]
-        basket.updated_at = datetime.now()
-        return True
+            if not baskets.remove_item(basket, product_id):
+                return False
+
+            session.commit()
+            return True
+
+    @staticmethod
+    def update_item_quantity(basket_id: str, product_id: str, quantity: int) -> bool:
+        with SessionLocal() as session:
+            baskets = BasketRepository(session)
+            basket = baskets.get(basket_id)
+            if not basket:
+                return False
+
+            if not baskets.update_item_quantity(basket, product_id, quantity):
+                return False
+
+            session.commit()
+            return True
 
     @staticmethod
     def delete_basket(basket_id: str) -> bool:
-        return _BASKETS.pop(basket_id, None) is not None
+        with SessionLocal() as session:
+            baskets = BasketRepository(session)
+            basket = baskets.get(basket_id)
+            if not basket:
+                return False
+            baskets.delete(basket)
+            session.commit()
+            return True
 
 
 class PriceHistoryService:
     @staticmethod
     def record_price(product_id: str, store: str, price: float, url: Optional[str] = None):
-        key = f"{store}:{product_id}"
-        history = _PRICE_HISTORY.get(key, [])
+        with SessionLocal() as session:
+            history = PriceHistoryRepository(session)
+            latest = history.latest_for_product(product_id, store)
 
-        # Solo guardar si el precio cambió significativamente (>1%)
-        if history and abs(history[-1].price - price) / history[-1].price < 0.01:
-            return
+            if latest and latest.price and abs(latest.price - price) / latest.price < 0.01:
+                return
 
-        history.append(PriceHistory(
-            product_id=product_id,
-            store=store,
-            price=price,
-            date=datetime.now(),
-            url=url
-        ))
-
-        # Mantener solo los últimos 30 registros
-        _PRICE_HISTORY[key] = history[-30:]
+            history.create(product_id=product_id, store=store, price=price, url=url)
+            session.commit()
 
     @staticmethod
-    def get_price_history(product_id: str, store: str) -> List[PriceHistory]:
-        key = f"{store}:{product_id}"
-        return _PRICE_HISTORY.get(key, [])
+    def get_price_history(product_id: str, store: str) -> list[PriceHistory]:
+        with SessionLocal() as session:
+            records = PriceHistoryRepository(session).list_for_product(product_id, store)
+            return [_to_price_history(record) for record in records]
 
     @staticmethod
     def get_price_trends(product_id: str, store: str, days: int = 30) -> dict:
@@ -131,7 +174,6 @@ class PriceHistoryService:
         min_price = min(h.price for h in recent_history)
         max_price = max(h.price for h in recent_history)
 
-        # Calcular tendencia básica
         if len(recent_history) >= 2:
             first_price = recent_history[0].price
             last_price = recent_history[-1].price
@@ -149,5 +191,5 @@ class PriceHistoryService:
             "min_price": min_price,
             "max_price": max_price,
             "trend": trend,
-            "history_count": len(recent_history)
+            "history_count": len(recent_history),
         }

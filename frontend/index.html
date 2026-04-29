@@ -6,7 +6,7 @@
     <title>Radar de Precios | Comparador real de supermercado</title>
     <meta
       name="description"
-      content="Compara precios reales de Lider, filtra, ordena, guarda favoritos e historial en una experiencia moderna tipo ecommerce."
+      content="Compara precios reales de supermercado, filtra, ordena, guarda favoritos e historial en una experiencia web."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -32,9 +32,20 @@
             <a href="#baskets" class="nav-link" id="baskets-link">Canastas</a>
           </nav>
           <div class="topbar__meta">
-            <span class="topbar__pill">Lider.cl y Jumbo.cl en vivo</span>
-            <span class="topbar__pill topbar__pill--ghost">Frontend ecommerce responsive</span>
+            <span class="topbar__pill">Lider operativo</span>
+            <span class="topbar__pill topbar__pill--ghost">Jumbo experimental</span>
           </div>
+          <form id="auth-form" class="auth-box">
+            <input id="auth-username" type="text" autocomplete="username" placeholder="usuario" />
+            <input id="auth-email" type="email" autocomplete="email" placeholder="email" />
+            <input id="auth-password" type="password" autocomplete="current-password" placeholder="clave" />
+            <div class="auth-box__actions">
+              <button id="login-btn" type="submit">Entrar</button>
+              <button id="register-btn" type="button">Crear</button>
+              <button id="logout-btn" type="button" hidden>Salir</button>
+            </div>
+            <span id="auth-status" class="auth-box__status">Sin sesion</span>
+          </form>
         </div>
 
         <section class="hero">
@@ -42,7 +53,7 @@
             <p class="eyebrow">Comparador tipo canasta</p>
             <h1>Busca, ordena y detecta el mejor precio sin salir de una sola pantalla.</h1>
             <p class="hero__text">
-              El buscador consulta productos reales de Lider y Jumbo, construye una vista limpia para
+              El buscador consulta productos reales de supermercado, construye una vista limpia para
               comparar y te deja seguir favoritos e historial desde el navegador.
             </p>
 
@@ -200,7 +211,7 @@
               <span id="active-filters-label" class="muted-text">Sin filtros activos</span>
             </div>
             <a id="source-link" class="source-link" href="#" target="_blank" rel="noreferrer">
-              Ver fuente en Lider
+              Ver fuente
             </a>
           </section>
 
@@ -213,7 +224,10 @@
         <div class="shell">
           <header class="section-header">
             <h1>Canastas de Compras</h1>
-            <button id="new-basket-btn" class="btn btn--primary">Nueva Canasta</button>
+            <div class="section-header__actions">
+              <span id="basket-owner-label" class="muted-text">Canastas locales</span>
+              <button id="new-basket-btn" class="btn btn--primary">Nueva Canasta</button>
+            </div>
           </header>
 
           <div id="baskets-list" class="baskets-list"></div>

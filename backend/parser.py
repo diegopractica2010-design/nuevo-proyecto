@@ -67,7 +67,7 @@ def _strip_tracking(url: str) -> str:
     return urlunsplit((split.scheme, split.netloc, split.path, "", ""))
 
 
-def _normalize_url(url: str | None) -> str | None:
+def _normalize_url(url: str | None, *, base_url: str = PRODUCT_BASE_URL) -> str | None:
     normalized = _normalize_text(url)
     if not normalized:
         return None
@@ -75,7 +75,7 @@ def _normalize_url(url: str | None) -> str | None:
     if normalized.startswith("//"):
         normalized = f"https:{normalized}"
     elif normalized.startswith("/"):
-        normalized = urljoin(PRODUCT_BASE_URL, normalized)
+        normalized = urljoin(base_url, normalized)
 
     return _strip_tracking(normalized)
 
@@ -227,7 +227,12 @@ def _append_product(products: list[dict], seen: set[str], raw_product: dict):
     products.append(raw_product)
 
 
-def _normalize_search_state_item(item: dict, *, position: int) -> dict | None:
+def _normalize_search_state_item(
+    item: dict,
+    *,
+    position: int,
+    base_url: str = PRODUCT_BASE_URL,
+) -> dict | None:
     price_info = item.get("priceInfo") or {}
     price = (
         parse_price_text(price_info.get("linePrice"))
@@ -274,7 +279,7 @@ def _normalize_search_state_item(item: dict, *, position: int) -> dict | None:
         "savings_text": _normalize_text(price_info.get("savings")),
         "unit_price": _normalize_text(price_info.get("unitPrice")),
         "image": _normalize_image(image or item.get("image")),
-        "url": _normalize_url(item.get("canonicalUrl")),
+        "url": _normalize_url(item.get("canonicalUrl"), base_url=base_url),
         "availability": normalized_availability,
         "in_stock": _is_in_stock(availability_value),
         "seller": _normalize_text(item.get("sellerName")) or "Lider",
@@ -284,7 +289,7 @@ def _normalize_search_state_item(item: dict, *, position: int) -> dict | None:
     }
 
 
-def _parse_search_result(search_result: dict, limit: int) -> list[dict]:
+def _parse_search_result(search_result: dict, limit: int, *, base_url: str = PRODUCT_BASE_URL) -> list[dict]:
     products: list[dict] = []
     seen: set[str] = set()
 
@@ -294,7 +299,11 @@ def _parse_search_result(search_result: dict, limit: int) -> list[dict]:
             if not isinstance(item, dict):
                 continue
 
-            raw_product = _normalize_search_state_item(item, position=len(products) + 1)
+            raw_product = _normalize_search_state_item(
+                item,
+                position=len(products) + 1,
+                base_url=base_url,
+            )
             if raw_product is None:
                 continue
 
@@ -311,23 +320,39 @@ def _normalize_ldjson_offer(offers: Any) -> dict:
     return offers if isinstance(offers, dict) else {}
 
 
-def _parse_next_data(html: str, limit: int) -> ParseResult:
+def _parse_next_data(html: str, limit: int, *, base_url: str = PRODUCT_BASE_URL) -> ParseResult:
     search_result = _extract_next_data_search_result(html)
     if not isinstance(search_result, dict):
         return ParseResult(products=[], parser=None)
 
-    return ParseResult(products=_parse_search_result(search_result, limit), parser="next_data")
+    return ParseResult(
+        products=_parse_search_result(search_result, limit, base_url=base_url),
+        parser="next_data",
+    )
 
 
-def _parse_inline_search_result(html: str, limit: int) -> ParseResult:
+def _parse_inline_search_result(
+    html: str,
+    limit: int,
+    *,
+    base_url: str = PRODUCT_BASE_URL,
+) -> ParseResult:
     search_result = _extract_json_object(html, "searchResult")
     if not isinstance(search_result, dict):
         return ParseResult(products=[], parser=None)
 
-    return ParseResult(products=_parse_search_result(search_result, limit), parser="inline_search")
+    return ParseResult(
+        products=_parse_search_result(search_result, limit, base_url=base_url),
+        parser="inline_search",
+    )
 
 
-def _parse_ld_json(soup: BeautifulSoup, limit: int) -> ParseResult:
+def _parse_ld_json(
+    soup: BeautifulSoup,
+    limit: int,
+    *,
+    base_url: str = PRODUCT_BASE_URL,
+) -> ParseResult:
     products: list[dict] = []
     seen: set[str] = set()
 
@@ -361,7 +386,7 @@ def _parse_ld_json(soup: BeautifulSoup, limit: int) -> ParseResult:
                 "savings_text": None,
                 "unit_price": None,
                 "image": _normalize_image(product.get("image")),
-                "url": _normalize_url(product.get("url")),
+                "url": _normalize_url(product.get("url"), base_url=base_url),
                 "availability": _normalize_availability(availability),
                 "in_stock": _is_in_stock(availability),
                 "seller": "Lider",
@@ -381,7 +406,12 @@ def _slug_like(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
 
 
-def _parse_html_fallback(soup: BeautifulSoup, limit: int) -> ParseResult:
+def _parse_html_fallback(
+    soup: BeautifulSoup,
+    limit: int,
+    *,
+    base_url: str = PRODUCT_BASE_URL,
+) -> ParseResult:
     products: list[dict] = []
     seen: set[str] = set()
     selectors = [
@@ -424,7 +454,7 @@ def _parse_html_fallback(soup: BeautifulSoup, limit: int) -> ParseResult:
                 price_text = match.group(0) if match else None
 
             name = _normalize_text(name_node.get_text(" ", strip=True) if name_node else None)
-            url = _normalize_url(link_node.get("href") if link_node else None)
+            url = _normalize_url(link_node.get("href") if link_node else None, base_url=base_url)
             if url and not name:
                 name = _normalize_text(link_node.get("title"))
 
@@ -454,22 +484,27 @@ def _parse_html_fallback(soup: BeautifulSoup, limit: int) -> ParseResult:
     return ParseResult(products=products, parser="html_fallback" if products else None)
 
 
-def parse_catalog_page(html: str, limit: int = MAX_RESULTS) -> ParseResult:
+def parse_catalog_page(
+    html: str,
+    limit: int = MAX_RESULTS,
+    *,
+    base_url: str = PRODUCT_BASE_URL,
+) -> ParseResult:
     if not html:
         return ParseResult(products=[], parser=None)
 
     for parser in (_parse_next_data, _parse_inline_search_result):
-        parsed = parser(html, limit)
+        parsed = parser(html, limit, base_url=base_url)
         if parsed.products:
             return parsed
 
     soup = BeautifulSoup(html, "html.parser")
 
-    parsed = _parse_ld_json(soup, limit)
+    parsed = _parse_ld_json(soup, limit, base_url=base_url)
     if parsed.products:
         return parsed
 
-    return _parse_html_fallback(soup, limit)
+    return _parse_html_fallback(soup, limit, base_url=base_url)
 
 
 def parse_products(html: str, limit: int = MAX_RESULTS) -> list[dict]:

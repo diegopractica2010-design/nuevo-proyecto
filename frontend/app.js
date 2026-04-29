@@ -1,6 +1,7 @@
 const STORAGE_KEYS = {
   favorites: "radar-precios-favorites-v2",
   history: "radar-precios-history-v2",
+  authToken: "radar-precios-auth-token-v1",
 };
 
 const QUICK_QUERIES = [
@@ -23,7 +24,18 @@ const DEFAULT_FILTERS = {
   category: "",
 };
 
-const DEFAULT_SOURCE_URL = "https://super.lider.cl";
+const STORE_CONFIG = {
+  lider: {
+    label: "Lider",
+    host: "Lider.cl",
+    url: "https://super.lider.cl",
+  },
+  jumbo: {
+    label: "Jumbo",
+    host: "Jumbo.cl",
+    url: "https://www.jumbo.cl",
+  },
+};
 
 const state = {
   query: "",
@@ -43,7 +55,7 @@ const state = {
   },
   suggestions: [],
   fetchedAt: "",
-  sourceUrl: DEFAULT_SOURCE_URL,
+  sourceUrl: getStoreConfig("lider").url,
   strategy: "",
   cached: false,
   loading: false,
@@ -54,9 +66,11 @@ const state = {
   history: loadJSON(STORAGE_KEYS.history, []),
   requestToken: 0,
   abortController: null,
-  store: "lider",  // Nueva propiedad para la tienda seleccionada
+  store: "lider",
   currentBasket: null,
   baskets: [],
+  authToken: localStorage.getItem(STORAGE_KEYS.authToken) || "",
+  currentUser: null,
 };
 
 const currencyFormatter = new Intl.NumberFormat("es-CL", {
@@ -108,6 +122,15 @@ const elements = {
   backToBaskets: document.getElementById("back-to-baskets"),
   basketItems: document.getElementById("basket-items"),
   basketTotal: document.getElementById("basket-total"),
+  authForm: document.getElementById("auth-form"),
+  authUsername: document.getElementById("auth-username"),
+  authEmail: document.getElementById("auth-email"),
+  authPassword: document.getElementById("auth-password"),
+  loginBtn: document.getElementById("login-btn"),
+  registerBtn: document.getElementById("register-btn"),
+  logoutBtn: document.getElementById("logout-btn"),
+  authStatus: document.getElementById("auth-status"),
+  basketOwnerLabel: document.getElementById("basket-owner-label"),
 };
 
 initialize();
@@ -117,6 +140,7 @@ function initialize() {
   bindEvents();
   syncFilterInputs();
   renderAll();
+  restoreSession();
 
   const params = new URLSearchParams(window.location.search);
   const initialQuery = params.get("q") || (state.history[0] && state.history[0].query) || "leche";
@@ -128,6 +152,19 @@ function bindEvents() {
   elements.form.addEventListener("submit", (event) => {
     event.preventDefault();
     performSearch(elements.input.value);
+  });
+
+  elements.authForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    login();
+  });
+
+  elements.registerBtn.addEventListener("click", () => {
+    register();
+  });
+
+  elements.logoutBtn.addEventListener("click", () => {
+    logout();
   });
 
   elements.storeSelect.addEventListener("change", (event) => {
@@ -270,6 +307,31 @@ function bindEvents() {
       renderFilters();
       renderResults();
       renderSummary();
+      return;
+    }
+
+    if (action === "view-basket") {
+      viewBasket(trigger.dataset.basketId);
+      return;
+    }
+
+    if (action === "add-to-basket") {
+      addToBasketByKey(trigger.dataset.key);
+      return;
+    }
+
+    if (action === "view-price-history") {
+      viewPriceHistoryByKey(trigger.dataset.key);
+      return;
+    }
+
+    if (action === "remove-basket-item") {
+      removeFromBasket(trigger.dataset.basketId, trigger.dataset.productId);
+      return;
+    }
+
+    if (action === "update-basket-quantity") {
+      updateBasketQuantity(trigger.dataset.basketId, trigger.dataset.productId);
     }
   });
 }
@@ -281,7 +343,7 @@ async function performSearch(query) {
     state.warning = "";
     state.results = [];
     state.fetchedAt = "";
-    state.sourceUrl = DEFAULT_SOURCE_URL;
+    state.sourceUrl = getCurrentStoreConfig().url;
     state.strategy = "";
     state.cached = false;
     renderFeedback();
@@ -332,7 +394,7 @@ async function performSearch(query) {
     state.appliedQuery = data.applied_query || trimmedQuery;
     state.warning = data.warning || "";
     state.fetchedAt = data.fetched_at || "";
-    state.sourceUrl = data.source_url || DEFAULT_SOURCE_URL;
+    state.sourceUrl = data.source_url || getCurrentStoreConfig().url;
     state.strategy = data.strategy || "";
     state.cached = Boolean(data.cached);
     state.error = "";
@@ -359,7 +421,7 @@ async function performSearch(query) {
     };
     state.suggestions = [];
     state.fetchedAt = "";
-    state.sourceUrl = DEFAULT_SOURCE_URL;
+    state.sourceUrl = getCurrentStoreConfig().url;
     state.strategy = "";
     state.cached = false;
     state.error = error.message || "No se pudo conectar con el backend.";
@@ -403,7 +465,7 @@ function renderFeedback() {
   if (state.loading) {
     cards.push(`
       <article class="feedback-card">
-        <strong>🔍 Buscando precios en Lider.cl</strong>
+        <strong>Buscando precios en ${escapeHtml(getCurrentStoreConfig().host)}</strong>
         <span>Extrayendo datos en tiempo real, aplicando filtros y calculando estadísticas...</span>
       </article>
     `);
@@ -595,9 +657,9 @@ function renderSidePanels() {
           (product) => `
             <article class="saved-card">
               <strong>${escapeHtml(product.name)}</strong>
-              <span class="saved-card__meta">${escapeHtml(product.brand || "Lider")} · ${formatPrice(product.price)}</span>
+              <span class="saved-card__meta">${escapeHtml(product.brand || product.source || "Producto")} · ${formatPrice(product.price)}</span>
               <div class="saved-card__actions">
-                <a href="${escapeAttribute(product.url || DEFAULT_SOURCE_URL)}" target="_blank" rel="noreferrer">Ver producto</a>
+                <a href="${escapeAttribute(product.url || getStoreConfig(product.source).url)}" target="_blank" rel="noreferrer">Ver producto</a>
                 <button type="button" data-action="remove-favorite" data-key="${escapeAttribute(getProductKey(product))}">Quitar</button>
               </div>
             </article>
@@ -634,7 +696,8 @@ function renderResults() {
     ? activeFilters.join(" · ")
     : "Sin filtros activos";
 
-  elements.sourceLink.href = state.sourceUrl || DEFAULT_SOURCE_URL;
+  elements.sourceLink.href = state.sourceUrl || getCurrentStoreConfig().url;
+  elements.sourceLink.textContent = `Ver fuente en ${getCurrentStoreConfig().label}`;
 
   if (state.loading) {
     elements.resultsGrid.innerHTML = Array.from({ length: 8 }, () => '<article class="skeleton-card"></article>').join("");
@@ -701,7 +764,7 @@ function renderProductCard(product, cheapestKey) {
 
       <div class="product-card__content">
         <div class="badge-row">
-          <span class="badge">${escapeHtml(product.seller || "Lider")}</span>
+          <span class="badge">${escapeHtml(product.seller || getStoreConfig(product.source).label)}</span>
           ${isCheapest ? '<span class="badge badge--best">Mejor precio</span>' : ""}
           ${product.is_offer ? '<span class="badge badge--offer">Oferta</span>' : ""}
           ${product.in_stock ? '<span class="badge badge--stock">En stock</span>' : ""}
@@ -711,7 +774,7 @@ function renderProductCard(product, cheapestKey) {
         <div class="product-card__heading">
           <h3>${escapeHtml(product.name)}</h3>
           <p class="product-card__meta">
-            ${escapeHtml([product.brand, product.category].filter(Boolean).join(" · ") || "Producto Lider")}
+            ${escapeHtml([product.brand, product.category].filter(Boolean).join(" · ") || `Producto ${getStoreConfig(product.source).label}`)}
           </p>
         </div>
 
@@ -728,16 +791,18 @@ function renderProductCard(product, cheapestKey) {
 
         <div class="product-card__footer">
           <span class="product-card__availability">${escapeHtml(buildAvailabilityLabel(product))}</span>
-          <button onclick="addToBasket(${JSON.stringify(product).replace(/"/g, '&quot;')})" class="btn btn--small">Agregar a canasta</button>
+          <button class="btn btn--small" type="button" data-action="add-to-basket" data-key="${escapeAttribute(key)}">Agregar a canasta</button>
+          <button class="btn btn--small btn--ghost" type="button" data-action="view-price-history" data-key="${escapeAttribute(key)}">Historial</button>
           <a
             class="action-link"
-            href="${escapeAttribute(product.url || DEFAULT_SOURCE_URL)}"
+            href="${escapeAttribute(product.url || getStoreConfig(product.source).url)}"
             target="_blank"
             rel="noreferrer"
           >
             Ver producto
           </a>
         </div>
+        <div class="price-history" data-history-key="${escapeAttribute(key)}" hidden></div>
       </div>
     </article>
   `;
@@ -809,35 +874,47 @@ async function showBaskets() {
 
   // Cargar canastas
   try {
-    const response = await fetch('/baskets');
+    const response = await fetchWithAuth('/baskets');
+    if (!response.ok) {
+      throw new Error("No se pudieron cargar las canastas.");
+    }
     const baskets = await response.json();
     state.baskets = baskets;
+    elements.basketOwnerLabel.textContent = state.currentUser
+      ? `Canastas de ${state.currentUser.username}`
+      : "Canastas locales";
     renderBaskets();
   } catch (error) {
     console.error('Error loading baskets:', error);
+    elements.basketsList.innerHTML = `<div class="saved-empty">No pudimos cargar tus canastas.</div>`;
   }
 }
 
 function renderBaskets() {
-  elements.basketsList.innerHTML = state.baskets.map(basket => `
-    <article class="basket-card" onclick="viewBasket('${basket.id}')">
+  elements.basketDetail.style.display = 'none';
+  elements.basketsList.style.display = 'grid';
+  elements.basketsList.innerHTML = state.baskets.length ? state.baskets.map(basket => `
+    <article class="basket-card" data-action="view-basket" data-basket-id="${escapeAttribute(basket.id)}">
       <h3>${escapeHtml(basket.name)}</h3>
       <div class="basket-meta">
         <span>${basket.item_count} productos</span>
         <span>${currencyFormatter.format(basket.total_price)}</span>
-        <span>${basket.stores.join(', ')}</span>
+        <span>${basket.stores.length ? basket.stores.join(', ') : 'Sin tiendas'}</span>
       </div>
     </article>
-  `).join('');
+  `).join('') : `<div class="saved-empty">Crea una canasta para empezar a guardar productos.</div>`;
 }
 
 async function createBasket(name) {
   try {
-    const response = await fetch('/baskets', {
+    const response = await fetchWithAuth('/baskets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
     });
+    if (!response.ok) {
+      throw new Error("No se pudo crear la canasta.");
+    }
     const basket = await response.json();
     state.baskets.unshift(basket);
     renderBaskets();
@@ -848,7 +925,10 @@ async function createBasket(name) {
 
 async function viewBasket(basketId) {
   try {
-    const response = await fetch(`/baskets/${basketId}`);
+    const response = await fetchWithAuth(`/baskets/${basketId}`);
+    if (!response.ok) {
+      throw new Error("No se pudo cargar la canasta.");
+    }
     const basket = await response.json();
     state.currentBasket = basket;
     renderBasketDetail();
@@ -886,30 +966,300 @@ function renderBasketDetail() {
   `;
 }
 
+async function restoreSession() {
+  renderAuthState();
+  if (!state.authToken) {
+    return;
+  }
+
+  try {
+    const response = await fetchWithAuth("/auth/me");
+    if (!response.ok) {
+      logout(false);
+      return;
+    }
+    state.currentUser = await response.json();
+    renderAuthState();
+    await showBasketsForCache();
+  } catch (error) {
+    console.error("Error restoring session:", error);
+  }
+}
+
+async function login() {
+  const username = elements.authUsername.value.trim();
+  const password = elements.authPassword.value;
+  if (!username || !password) {
+    setAuthStatus("Ingresa usuario y clave.");
+    return;
+  }
+
+  try {
+    const response = await fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "No se pudo iniciar sesion.");
+    }
+    state.authToken = data.access_token;
+    localStorage.setItem(STORAGE_KEYS.authToken, state.authToken);
+    await restoreSession();
+  } catch (error) {
+    setAuthStatus(error.message || "No se pudo iniciar sesion.");
+  }
+}
+
+async function register() {
+  const username = elements.authUsername.value.trim();
+  const email = elements.authEmail.value.trim();
+  const password = elements.authPassword.value;
+  if (!username || !email || !password) {
+    setAuthStatus("Completa usuario, email y clave.");
+    return;
+  }
+
+  try {
+    const response = await fetch("/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, email, password }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "No se pudo crear el usuario.");
+    }
+    await login();
+  } catch (error) {
+    setAuthStatus(error.message || "No se pudo crear el usuario.");
+  }
+}
+
+function logout(clearToken = true) {
+  state.currentUser = null;
+  state.baskets = [];
+  state.currentBasket = null;
+  if (clearToken) {
+    state.authToken = "";
+    localStorage.removeItem(STORAGE_KEYS.authToken);
+  }
+  renderAuthState();
+  renderBaskets();
+}
+
+function renderAuthState() {
+  const loggedIn = Boolean(state.currentUser);
+  elements.authEmail.hidden = loggedIn;
+  elements.authPassword.hidden = loggedIn;
+  elements.loginBtn.hidden = loggedIn;
+  elements.registerBtn.hidden = loggedIn;
+  elements.logoutBtn.hidden = !loggedIn;
+  elements.authUsername.value = loggedIn ? state.currentUser.username : elements.authUsername.value;
+  elements.authUsername.disabled = loggedIn;
+  setAuthStatus(loggedIn ? `Sesion activa: ${state.currentUser.username}` : "Sin sesion");
+}
+
+function setAuthStatus(message) {
+  elements.authStatus.textContent = message;
+}
+
+function fetchWithAuth(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (state.authToken) {
+    headers.set("Authorization", `Bearer ${state.authToken}`);
+  }
+  return fetch(url, { ...options, headers });
+}
+
+async function showBasketsForCache() {
+  const response = await fetchWithAuth('/baskets');
+  if (response.ok) {
+    state.baskets = await response.json();
+  }
+}
+
+function chooseBasket() {
+  if (state.baskets.length === 1) {
+    return state.baskets[0];
+  }
+
+  const options = state.baskets
+    .map((basket, index) => `${index + 1}. ${basket.name}`)
+    .join("\n");
+  const selected = Number(prompt(`Elige una canasta:\n${options}`));
+  return state.baskets[selected - 1] || null;
+}
+
+function renderBasketDetail() {
+  const basket = state.currentBasket;
+  if (!basket) return;
+
+  elements.basketTitle.textContent = basket.name;
+  elements.basketsList.style.display = 'none';
+  elements.basketDetail.style.display = 'block';
+
+  elements.basketItems.innerHTML = basket.items.map(item => `
+    <article class="basket-item">
+      <div class="basket-item__info">
+        <h4>${escapeHtml(item.name)}</h4>
+        <span>${escapeHtml(item.store)} · ${currencyFormatter.format(item.price)} c/u</span>
+      </div>
+      <div class="basket-item__price">
+        <span>${currencyFormatter.format(item.price * item.quantity)}</span>
+        <div class="basket-actions">
+          <input id="qty-${escapeAttribute(item.product_id)}" type="number" min="0" value="${item.quantity}" />
+          <button class="btn btn--small" type="button" data-action="update-basket-quantity" data-basket-id="${escapeAttribute(basket.id)}" data-product-id="${escapeAttribute(item.product_id)}">Actualizar</button>
+          <button class="btn btn--small" type="button" data-action="remove-basket-item" data-basket-id="${escapeAttribute(basket.id)}" data-product-id="${escapeAttribute(item.product_id)}">Remover</button>
+        </div>
+      </div>
+    </article>
+  `).join('') || `<div class="saved-empty">Esta canasta todavia no tiene productos.</div>`;
+
+  const total = basket.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  elements.basketTotal.innerHTML = `
+    <div class="total-summary">
+      <strong>Total: ${currencyFormatter.format(total)}</strong>
+    </div>
+  `;
+}
+
 async function removeFromBasket(basketId, productId) {
   try {
-    await fetch(`/baskets/${basketId}/items/${productId}`, { method: 'DELETE' });
-    // Recargar la canasta
+    await fetchWithAuth(`/baskets/${basketId}/items/${encodeURIComponent(productId)}`, { method: 'DELETE' });
     viewBasket(basketId);
   } catch (error) {
     console.error('Error removing item:', error);
   }
 }
 
-// Función para agregar productos a canastas desde los resultados
-function addToBasket(product) {
-  const basketId = prompt("ID de la canasta (cópialo de la sección Canastas):");
-  if (basketId) {
-    fetch(`/baskets/${basketId}/items`, {
+async function updateBasketQuantity(basketId, productId) {
+  const input = document.getElementById(`qty-${productId}`);
+  const quantity = Number(input ? input.value : 1);
+  try {
+    await fetchWithAuth(`/baskets/${basketId}/items/${encodeURIComponent(productId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quantity: Math.max(0, quantity) })
+    });
+    viewBasket(basketId);
+  } catch (error) {
+    console.error('Error updating item:', error);
+  }
+}
+
+async function addToBasketByKey(key) {
+  const product = state.results.find((item) => getProductKey(item) === key);
+  if (!product) {
+    return;
+  }
+
+  if (!state.baskets.length) {
+    await showBasketsForCache();
+  }
+  if (!state.baskets.length) {
+    const name = prompt("Nombre para tu primera canasta:");
+    if (!name) {
+      return;
+    }
+    await createBasket(name);
+  }
+
+  const basket = chooseBasket();
+  if (!basket) {
+    return;
+  }
+
+  try {
+    const response = await fetchWithAuth(`/baskets/${basket.id}/items`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ product, quantity: 1 })
-    }).then(() => {
-      alert('Producto agregado a la canasta');
-    }).catch(error => {
-      console.error('Error adding to basket:', error);
     });
+    if (!response.ok) {
+      throw new Error("No se pudo agregar el producto.");
+    }
+    await showBasketsForCache();
+    alert('Producto agregado a la canasta');
+  } catch (error) {
+    console.error('Error adding to basket:', error);
+    alert(error.message || 'No se pudo agregar el producto');
   }
+}
+
+async function viewPriceHistoryByKey(key) {
+  const product = state.results.find((item) => getProductKey(item) === key);
+  const panel = Array.from(document.querySelectorAll("[data-history-key]")).find(
+    (item) => item.dataset.historyKey === key
+  );
+  if (!product || !panel) {
+    return;
+  }
+
+  if (!panel.hidden) {
+    panel.hidden = true;
+    return;
+  }
+
+  panel.hidden = false;
+  panel.innerHTML = `<span class="muted-text">Cargando historial...</span>`;
+
+  const productId = product.id || product.sku || product.url || product.name;
+  const store = product.source || state.store;
+
+  try {
+    const response = await fetch(
+      `/price-history/${encodeURIComponent(productId)}?store=${encodeURIComponent(store)}`
+    );
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "No se pudo cargar el historial.");
+    }
+
+    const history = Array.isArray(data.history) ? data.history : [];
+    const trend = data.trends || {};
+    panel.innerHTML = renderPriceHistory(history, trend);
+  } catch (error) {
+    panel.innerHTML = `<span class="muted-text">${escapeHtml(error.message || "Historial no disponible.")}</span>`;
+  }
+}
+
+function renderPriceHistory(history, trend) {
+  if (!history.length) {
+    return `<span class="muted-text">Aun no hay historial suficiente para este producto.</span>`;
+  }
+
+  const points = history.slice(-5);
+  return `
+    <div class="price-history__summary">
+      <strong>${escapeHtml(formatTrendLabel(trend.trend))}</strong>
+      <span>Actual ${trend.current_price != null ? formatPrice(trend.current_price) : "sin dato"}</span>
+      <span>Min ${trend.min_price != null ? formatPrice(trend.min_price) : "sin dato"}</span>
+      <span>Max ${trend.max_price != null ? formatPrice(trend.max_price) : "sin dato"}</span>
+    </div>
+    <ol class="price-history__list">
+      ${points
+        .map(
+          (item) => `
+            <li>
+              <span>${escapeHtml(formatDateTime(item.date))}</span>
+              <strong>${formatPrice(item.price)}</strong>
+            </li>
+          `
+        )
+        .join("")}
+    </ol>
+  `;
+}
+
+function formatTrendLabel(trend) {
+  const labels = {
+    increasing: "Tendencia al alza",
+    decreasing: "Tendencia a la baja",
+    stable: "Precio estable",
+  };
+  return labels[trend] || "Tendencia sin datos";
 }
 
 function hasStockAvailable(product) {
@@ -1114,4 +1464,12 @@ function escapeHtml(value) {
 
 function escapeAttribute(value) {
   return escapeHtml(value);
+}
+
+function getStoreConfig(store) {
+  return STORE_CONFIG[store] || STORE_CONFIG.lider;
+}
+
+function getCurrentStoreConfig() {
+  return getStoreConfig(state.store);
 }

@@ -15,7 +15,7 @@ from backend.models import (
     SearchStats,
 )
 from backend.scraper import NoResultsError, ScraperError, normalize_query, search_lider
-from backend.scraper_jumbo import search_jumbo
+from backend.store_adapters import get_store_adapter
 
 
 class SearchServiceError(RuntimeError):
@@ -136,7 +136,11 @@ def _empty_response(
 
 def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") -> SearchResponse:
     normalized_query = normalize_query(query)
+    store = (store or "lider").strip().lower()
     limit = max(1, min(limit, MAX_RESULTS))
+    adapter = get_store_adapter(store)
+    if not adapter:
+        raise SearchServiceError(f"Tienda no soportada: {store}", status_code=400)
 
     cached = _get_cache(store, normalized_query, limit, allow_stale=False)
     if cached:
@@ -145,12 +149,10 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
     stale = _get_cache(store, normalized_query, limit, allow_stale=True)
 
     try:
-        if store == "lider":
+        if adapter.name == "lider":
             scraped = search_lider(normalized_query, limit=limit)
-        elif store == "jumbo":
-            scraped = search_jumbo(normalized_query, limit=limit)
         else:
-            raise SearchServiceError(f"Tienda no soportada: {store}", status_code=400)
+            scraped = adapter.search(normalized_query, limit)
 
         products = [Product.model_validate({**product, "source": store}) for product in scraped.products[:limit]]
         response = SearchResponse(
@@ -195,6 +197,6 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
             return stale
 
         raise SearchServiceError(
-            "No fue posible obtener resultados reales de Lider en este momento. "
+            f"No fue posible obtener resultados reales de {store.title()} en este momento. "
             "Intenta nuevamente en unos segundos."
         ) from exc
