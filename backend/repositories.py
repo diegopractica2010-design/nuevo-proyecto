@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -24,7 +24,7 @@ class UserRepository:
             username=username,
             email=email,
             hashed_password=hashed_password,
-            created_at=datetime.now(),
+            created_at=datetime.now(UTC),
             is_active=True,
         )
         self.session.add(user)
@@ -40,8 +40,8 @@ class BasketRepository:
             id=basket_id,
             name=name,
             user_id=user_id,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         self.session.add(basket)
         return basket
@@ -83,10 +83,10 @@ class BasketRepository:
                     price=price,
                     quantity=quantity,
                     store=store,
-                    added_at=datetime.now(),
+                    added_at=datetime.now(UTC),
                 )
             )
-        basket.updated_at = datetime.now()
+        basket.updated_at = datetime.now(UTC)
 
     def remove_item(self, basket: BasketRecord, product_id: str) -> bool:
         item = next((item for item in basket.items if item.product_id == product_id), None)
@@ -94,7 +94,7 @@ class BasketRepository:
             return False
 
         self.session.delete(item)
-        basket.updated_at = datetime.now()
+        basket.updated_at = datetime.now(UTC)
         return True
 
     def update_item_quantity(self, basket: BasketRecord, product_id: str, quantity: int) -> bool:
@@ -106,7 +106,7 @@ class BasketRepository:
             self.session.delete(item)
         else:
             item.quantity = quantity
-        basket.updated_at = datetime.now()
+        basket.updated_at = datetime.now(UTC)
         return True
 
     def delete(self, basket: BasketRecord) -> None:
@@ -140,7 +140,7 @@ class PriceHistoryRepository:
             product_id=product_id,
             store=store,
             price=price,
-            date=datetime.now(),
+            date=datetime.now(UTC),
             url=url,
         )
         self.session.add(record)

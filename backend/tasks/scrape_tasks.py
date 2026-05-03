@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
@@ -36,7 +36,7 @@ def scrape_lider(self, query: str, limit: int = 36) -> dict:
                             product_key=product.canonical_key,
                             store_id=str(store.id),
                             value=scraped.price,
-                            observed_at=datetime.now(),
+                            observed_at=datetime.now(UTC),
                         )
                     )
                     inserted_prices += 1
@@ -68,3 +68,29 @@ def _get_or_create_store(session, name: str) -> StoreRecord:
     session.flush()
     return store
 
+
+@celery_app.task(bind=True, name="backend.tasks.monitor_scraper_health")
+def monitor_scraper_health(self) -> dict:
+    """
+    Tarea periodica que verifica que los scrapers funcionan.
+    Si detecta fallos, backend.parser_monitor envia alertas por los canales configurados.
+    """
+    try:
+        from backend.parser_monitor import run_full_check
+
+        result = run_full_check()
+        status = (
+            "degraded"
+            if any(
+                store.get("status") == "degraded"
+                for store in result.get("stores", {}).values()
+                if isinstance(store, dict)
+            )
+            else "ok"
+        )
+        result["task_status"] = status
+        logger.info("Monitor scraper completado: %s", status)
+        return result
+    except Exception as exc:
+        logger.error("monitor_scraper_health fallo: %s", exc, exc_info=True)
+        return {"task_status": "error", "error": str(exc)}

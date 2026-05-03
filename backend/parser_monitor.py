@@ -1,277 +1,321 @@
-"""
-HTML Structure Monitoring - FASE A
-
-Monitorea cambios en la estructura HTML de tiendas.
-Si cambia significativamente, alerta para evitar parser failures.
-
-Estrategia:
-1. Hacer snapshot periódico del HTML de búsqueda
-2. Comparar con snapshot anterior
-3. Si cambio > threshold, alertar
-4. Guardar histórico de snapshots para debugging
-"""
-
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
-from datetime import datetime
+import os
+import smtplib
+from datetime import UTC, datetime
+from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 import requests
+from bs4 import BeautifulSoup
 
-from backend.config import (
-    DATA_DIR,
-    REQUEST_TIMEOUT,
-    BROWSER_HEADERS,
-)
+from backend.config import BROWSER_HEADERS, DATA_DIR, REQUEST_TIMEOUT
+
 
 logger = logging.getLogger(__name__)
 
 SNAPSHOT_DIR = DATA_DIR / "parser_snapshots"
-PARSER_HISTORY_FILE = SNAPSHOT_DIR / "parser_history.json"
+STATE_FILE = SNAPSHOT_DIR / "parser_state.json"
+
+CONTROL_QUERIES = {
+    "lider": "leche",
+    "jumbo": "leche",
+}
 
 
-def _ensure_snapshot_dir():
-    """Create snapshot directory if doesn't exist."""
-    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+def run_full_check() -> dict[str, Any]:
+    """Ejecuta un check real de los scrapers y guarda el estado."""
+    result = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "stores": {},
+    }
+
+    for store, query in CONTROL_QUERIES.items():
+        result["stores"][store] = check_store(store, query)
+
+    state = _load_state()
+    state["last_check"] = result["timestamp"]
+    state["last_result"] = result
+    _save_state(state)
+    return result
 
 
-def _get_html_hash(html: str) -> str:
-    """Get SHA256 hash of HTML content."""
-    return hashlib.sha256(html.encode()).hexdigest()[:16]
+def check_store(store: str, query: str = "leche") -> dict[str, Any]:
+    started = datetime.now(UTC)
+    issues: list[str] = []
+    product_count = 0
+    html_changed = False
+    structure_detail = ""
 
-
-def _get_snapshot_filename(store: str, date: Optional[datetime] = None) -> str:
-    """Generate snapshot filename."""
-    if date is None:
-        date = datetime.now()
-    timestamp = date.strftime("%Y%m%d_%H%M%S")
-    return f"{store}_snapshot_{timestamp}.html"
-
-
-def _load_history() -> dict:
-    """Load parser change history."""
-    _ensure_snapshot_dir()
-    if PARSER_HISTORY_FILE.exists():
-        try:
-            with open(PARSER_HISTORY_FILE, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Failed to load parser history: {e}")
-    return {}
-
-
-def _save_history(history: dict):
-    """Save parser change history."""
-    _ensure_snapshot_dir()
     try:
-        with open(PARSER_HISTORY_FILE, "w") as f:
-            json.dump(history, f, indent=2)
-    except Exception as e:
-        logger.error(f"Failed to save parser history: {e}")
+        html = _fetch_search_html(store, query)
+        _save_latest_snapshot(store, html)
+        html_changed, structure_detail = _check_structure_changed(store, html)
 
-
-def take_html_snapshot(store: str, query: str = "leche") -> Optional[dict]:
-    """
-    Take HTML snapshot of a search page.
-    
-    Returns:
-        {
-            "store": "lider",
-            "timestamp": "2024-04-27T10:30:00",
-            "hash": "abc123...",
-            "html_file": "path/to/snapshot.html",
-            "size_kb": 150,
-        }
-    """
-    try:
-        _ensure_snapshot_dir()
-        
-        # Construct search URL
         if store == "lider":
-            url = f"https://super.lider.cl/search?q={query}"
+            from backend.infrastructure.scrapers.lider import LiderScraper
+
+            products = LiderScraper().parse_products(html, limit=10)
+            product_count = len(products)
+            if "__NEXT_DATA__" not in html:
+                issues.append("__NEXT_DATA__ no encontrado en Lider")
         elif store == "jumbo":
-            url = f"https://www.jumbo.cl/busqueda?ft={query}"
+            from backend.scraper_jumbo import search_jumbo
+
+            result = search_jumbo(query=query, limit=10)
+            product_count = len(getattr(result, "products", []) or [])
         else:
-            return None
-        
-        # Fetch HTML
-        logger.info(f"Taking snapshot of {store}...")
-        response = requests.get(url, headers=BROWSER_HEADERS, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        
-        html = response.text
-        html_hash = _get_html_hash(html)
-        
-        # Save snapshot
-        filename = _get_snapshot_filename(store)
-        filepath = SNAPSHOT_DIR / filename
-        
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(html)
-        
-        snapshot_info = {
-            "store": store,
-            "timestamp": datetime.now().isoformat(),
-            "hash": html_hash,
-            "html_file": str(filepath),
-            "size_kb": len(html) / 1024,
-            "query": query,
+            issues.append(f"Tienda desconocida: {store}")
+
+        if product_count == 0:
+            issues.append("El scraper no extrajo productos")
+
+        if html_changed and structure_detail:
+            issues.append(f"Cambio estructural detectado: {structure_detail}")
+
+        status = "degraded" if issues else "ok"
+        store_result = {
+            "status": status,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "duration_seconds": (datetime.now(UTC) - started).total_seconds(),
+            "product_count": product_count,
+            "issues": issues,
+            "structure_changed": html_changed,
+            "structure_detail": structure_detail,
         }
-        
-        logger.info(f"Snapshot saved: {filename} (hash: {html_hash})")
-        return snapshot_info
-    
-    except Exception as e:
-        logger.error(f"Failed to take snapshot of {store}: {e}")
-        return None
 
+        if status == "degraded":
+            store_result["alert_sent"] = _send_alert(_build_alert_message(store, store_result))
 
-def compare_snapshots(store: str) -> Optional[dict]:
-    """
-    Compare current snapshot with previous.
-    
-    Returns:
-        {
-            "store": "lider",
-            "changed": True,
-            "severity": "high",  # low|medium|high|critical
-            "last_hash": "abc...",
-            "current_hash": "xyz...",
-            "message": "Structure changed significantly",
-            "action": "MANUAL_REVIEW_REQUIRED",
+        return store_result
+    except Exception as exc:
+        logger.error("Parser check failed for %s: %s", store, exc, exc_info=True)
+        store_result = {
+            "status": "degraded",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "duration_seconds": (datetime.now(UTC) - started).total_seconds(),
+            "product_count": product_count,
+            "issues": [str(exc)],
+            "structure_changed": html_changed,
+            "structure_detail": structure_detail,
+            "alert_reason": "Excepcion durante el check",
         }
-    """
-    try:
-        history = _load_history()
-        
-        # Take new snapshot
-        current = take_html_snapshot(store)
-        if not current:
-            return None
-        
-        current_hash = current["hash"]
-        
-        # Get last snapshot hash
-        last_hash = history.get(f"{store}_last_hash")
-        
-        if not last_hash:
-            logger.info(f"No previous snapshot for {store}. Setting baseline.")
-            history[f"{store}_last_hash"] = current_hash
-            history[f"{store}_last_snapshot"] = current
-            _save_history(history)
-            return {
-                "store": store,
-                "changed": False,
-                "message": "Baseline snapshot set",
-            }
-        
-        # Compare
-        changed = current_hash != last_hash
-        
-        if changed:
-            logger.warning(f"HTML structure changed for {store}!")
-            logger.warning(f"  Previous hash: {last_hash}")
-            logger.warning(f"  Current hash: {current_hash}")
-            
-            # Determine severity (placeholder)
-            # TODO: Implement content-aware comparison (CSS selectors, element count, etc.)
-            severity = "high"  # Conservative: treat all changes as high
-            
-            result = {
-                "store": store,
-                "changed": True,
-                "severity": severity,
-                "last_hash": last_hash,
-                "current_hash": current_hash,
-                "message": f"HTML structure changed for {store}",
-                "action": "MANUAL_REVIEW_REQUIRED",
-            }
-            
-            # Update history
-            history[f"{store}_last_hash"] = current_hash
-            history[f"{store}_last_snapshot"] = current
-            history[f"{store}_last_change"] = {
-                "timestamp": datetime.now().isoformat(),
-                "previous_hash": last_hash,
-                "new_hash": current_hash,
-                "severity": severity,
-            }
-            _save_history(history)
-            
-            return result
-        else:
-            logger.debug(f"HTML structure unchanged for {store}")
-            return {
-                "store": store,
-                "changed": False,
-                "message": "No structural changes detected",
-            }
-    
-    except Exception as e:
-        logger.error(f"Failed to compare snapshots for {store}: {e}")
-        return None
+        store_result["alert_sent"] = _send_alert(_build_alert_message(store, store_result))
+        return store_result
 
 
-def get_parser_status() -> dict:
-    """Get current parser status for all stores."""
-    history = _load_history()
-    
+def get_status() -> dict[str, Any]:
+    """Retorna el ultimo estado guardado por run_full_check."""
+    state = _load_state()
+    last_result = state.get("last_result")
+    if isinstance(last_result, dict):
+        return {
+            "status": _aggregate_status(last_result),
+            "last_check": state.get("last_check"),
+            **last_result,
+        }
     return {
-        "timestamp": datetime.now().isoformat(),
-        "lider": {
-            "last_hash": history.get("lider_last_hash"),
-            "last_change": history.get("lider_last_change"),
-        },
-        "jumbo": {
-            "last_hash": history.get("jumbo_last_hash"),
-            "last_change": history.get("jumbo_last_change"),
-        },
+        "status": "unknown",
+        "last_check": None,
+        "stores": {},
         "snapshot_dir": str(SNAPSHOT_DIR),
     }
 
 
-# Celery task (placeholder - usar en backend.tasks)
-def monitor_html_changes() -> dict:
-    """
-    Periodic task to monitor HTML changes.
-    
-    Called from: celery beat scheduler (backend/celery_app.py)
-    Frequency: Every 6 hours (TO BE CONFIGURED)
-    """
+def get_parser_status() -> dict[str, Any]:
+    """Compatibilidad con endpoints legacy de monitoreo."""
+    return get_status()
+
+
+def monitor_html_changes() -> dict[str, Any]:
+    """Compatibilidad con la tarea legacy."""
+    return run_full_check()
+
+
+def compare_snapshots(store: str) -> dict[str, Any] | None:
+    """Compatibilidad: toma HTML actual y compara hashes guardados."""
     try:
-        logger.info("Starting HTML structure monitoring...")
-        
-        results = {
-            "timestamp": datetime.now().isoformat(),
-            "stores": {},
-        }
-        
-        for store in ["lider", "jumbo"]:
-            try:
-                result = compare_snapshots(store)
-                results["stores"][store] = result
-                
-                if result and result.get("changed"):
-                    logger.warning(
-                        f"ALERT: {store} HTML structure changed! "
-                        f"Severity: {result.get('severity')}"
-                    )
-                    # TODO: Send alert (email, Slack, Sentry)
-            
-            except Exception as e:
-                logger.error(f"Monitor failed for {store}: {e}")
-                results["stores"][store] = {"error": str(e)}
-        
-        logger.info("HTML structure monitoring completed")
-        return results
-    
-    except Exception as e:
-        logger.error(f"HTML monitoring task failed: {e}", exc_info=True)
+        html = _fetch_search_html(store, CONTROL_QUERIES.get(store, "leche"))
+        changed, detail = _check_structure_changed(store, html)
         return {
-            "status": "error",
-            "error": str(e),
+            "store": store,
+            "changed": changed,
+            "message": detail or "No structural changes detected",
         }
+    except Exception as exc:
+        logger.warning("compare_snapshots failed for %s: %s", store, exc)
+        return None
+
+
+def take_html_snapshot(store: str, query: str = "leche") -> dict[str, Any] | None:
+    try:
+        html = _fetch_search_html(store, query)
+        path = _save_latest_snapshot(store, html)
+        return {
+            "store": store,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "hash": _hash_text(html),
+            "html_file": str(path),
+            "size_kb": len(html) / 1024,
+            "query": query,
+        }
+    except Exception as exc:
+        logger.error("Failed to take snapshot of %s: %s", store, exc)
+        return None
+
+
+def _fetch_search_html(store: str, query: str) -> str:
+    if store == "lider":
+        url = "https://super.lider.cl/search"
+        params = {"q": query}
+    elif store == "jumbo":
+        url = "https://www.jumbo.cl/busqueda"
+        params = {"ft": query}
+    else:
+        raise ValueError(f"Tienda desconocida: {store}")
+
+    response = requests.get(url, params=params, headers=BROWSER_HEADERS, timeout=REQUEST_TIMEOUT)
+    response.raise_for_status()
+    return response.text
+
+
+def _save_latest_snapshot(store: str, html: str) -> Path:
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    latest = SNAPSHOT_DIR / f"{store}_latest.html"
+    latest.write_text(html, encoding="utf-8")
+    stamped = SNAPSHOT_DIR / f"{store}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.html"
+    stamped.write_text(html, encoding="utf-8")
+    return latest
+
+
+def _check_structure_changed(store: str, html: str) -> tuple[bool, str]:
+    try:
+        html_hash = _hash_text(html)
+        next_data_hash = _extract_next_data_hash(html)
+        state = _load_state()
+        prev_html_hash = state.get(f"{store}.html_hash")
+        prev_next_hash = state.get(f"{store}.next_data_hash")
+
+        changed = False
+        detail = ""
+        if prev_html_hash and prev_html_hash != html_hash:
+            changed = True
+            detail = f"HTML hash {prev_html_hash} -> {html_hash}"
+            if next_data_hash and prev_next_hash:
+                if prev_next_hash != next_data_hash:
+                    detail += f" (__NEXT_DATA__: {prev_next_hash} -> {next_data_hash})"
+                else:
+                    detail += " (__NEXT_DATA__ sin cambios)"
+                    changed = False
+
+        state[f"{store}.html_hash"] = html_hash
+        if next_data_hash:
+            state[f"{store}.next_data_hash"] = next_data_hash
+        _save_state(state)
+        return changed, detail
+    except Exception as exc:
+        logger.warning("Structure check failed for %s: %s", store, exc)
+        return False, f"check fallo: {exc}"
+
+
+def _extract_next_data_hash(html: str) -> str | None:
+    soup = BeautifulSoup(html, "html.parser")
+    script = soup.find("script", {"id": "__NEXT_DATA__"})
+    if not script or not script.string:
+        return None
+    return _hash_text(script.string)
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _aggregate_status(result: dict[str, Any]) -> str:
+    stores = result.get("stores", {})
+    if any(isinstance(item, dict) and item.get("status") == "degraded" for item in stores.values()):
+        return "degraded"
+    return "ok"
+
+
+def _build_alert_message(store: str, result: dict[str, Any]) -> str:
+    issues = "\n".join(f"  - {issue}" for issue in result.get("issues", []))
+    return (
+        "ALERTA RADAR DE PRECIOS\n\n"
+        f"Tienda: {store.upper()}\n"
+        f"Hora: {result.get('timestamp')}\n"
+        f"Estado: {result.get('status', 'desconocido').upper()}\n"
+        f"Productos en check de control: {result.get('product_count', '?')}\n\n"
+        f"Problemas detectados:\n{issues}\n\n"
+        f"Razon de alerta: {result.get('alert_reason', 'No especificada')}\n\n"
+        f"Snapshot HTML: data/parser_snapshots/{store}_latest.html"
+    )
+
+
+def _send_alert(message: str) -> bool:
+    sent = False
+
+    token = os.getenv("ALERT_TELEGRAM_TOKEN")
+    chat_id = os.getenv("ALERT_TELEGRAM_CHAT_ID")
+    if token and chat_id:
+        try:
+            response = requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": message, "parse_mode": ""},
+                timeout=10,
+            )
+            if response.ok:
+                logger.info("Alerta Telegram enviada")
+                sent = True
+            else:
+                logger.warning("Telegram fallo: %s %s", response.status_code, response.text[:200])
+        except Exception as exc:
+            logger.warning("Error enviando alerta Telegram: %s", exc)
+
+    email_to = os.getenv("ALERT_EMAIL_TO")
+    smtp_host = os.getenv("SMTP_HOST")
+    if email_to and smtp_host and not sent:
+        try:
+            smtp_port = int(os.getenv("SMTP_PORT", "587"))
+            smtp_user = os.getenv("SMTP_USER", "")
+            smtp_pass = os.getenv("SMTP_PASSWORD", "")
+            from_addr = os.getenv("SMTP_FROM", smtp_user or "alerts@radar.local")
+
+            msg = MIMEText(message)
+            msg["Subject"] = "Radar de Precios - Parser Alert"
+            msg["From"] = from_addr
+            msg["To"] = email_to
+
+            with smtplib.SMTP(smtp_host, smtp_port) as server:
+                server.starttls()
+                if smtp_user and smtp_pass:
+                    server.login(smtp_user, smtp_pass)
+                server.sendmail(from_addr, [email_to], msg.as_string())
+
+            logger.info("Alerta email enviada a %s", email_to)
+            sent = True
+        except Exception as exc:
+            logger.warning("Error enviando alerta email: %s", exc)
+
+    if not sent:
+        logger.error("ALERTA SIN CANAL CONFIGURADO:\n%s", message)
+
+    return sent
+
+
+def _load_state() -> dict[str, Any]:
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    if STATE_FILE.exists():
+        try:
+            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_state(state: dict[str, Any]) -> None:
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")

@@ -147,9 +147,3 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 exc_info=True
             )
             raise
-        
-        # Agregar headers de rate limiting
-        response.headers["X-RateLimit-Limit"] = str(limit)
-        response.headers["X-RateLimit-Remaining"] = str(limit - recent_count - 1)
-        
-        return response

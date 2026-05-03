@@ -370,7 +370,7 @@ async function performSearch(query) {
   renderAll();
 
   try {
-    const response = await fetch(`/search?query=${encodeURIComponent(trimmedQuery)}&limit=36&store=${state.store}`, {
+    const response = await fetch(`/api/search?q=${encodeURIComponent(trimmedQuery)}&limit=36&store=${state.store}`, {
       signal: controller.signal,
     });
     const data = await response.json();
@@ -899,7 +899,7 @@ function renderBaskets() {
       <div class="basket-meta">
         <span>${basket.item_count} productos</span>
         <span>${currencyFormatter.format(basket.total_price)}</span>
-        <span>${basket.stores.length ? basket.stores.join(', ') : 'Sin tiendas'}</span>
+        <span>${basket.stores.length ? escapeHtml(basket.stores.join(', ')) : 'Sin tiendas'}</span>
       </div>
     </article>
   `).join('') : `<div class="saved-empty">Crea una canasta para empezar a guardar productos.</div>`;
@@ -935,35 +935,6 @@ async function viewBasket(basketId) {
   } catch (error) {
     console.error('Error loading basket:', error);
   }
-}
-
-function renderBasketDetail() {
-  const basket = state.currentBasket;
-  if (!basket) return;
-
-  elements.basketTitle.textContent = basket.name;
-  elements.basketsList.style.display = 'none';
-  elements.basketDetail.style.display = 'block';
-
-  elements.basketItems.innerHTML = basket.items.map(item => `
-    <article class="basket-item">
-      <div class="basket-item__info">
-        <h4>${escapeHtml(item.name)}</h4>
-        <span>${item.store} • ${item.quantity} unidades</span>
-      </div>
-      <div class="basket-item__price">
-        <span>${currencyFormatter.format(item.price * item.quantity)}</span>
-        <button onclick="removeFromBasket('${basket.id}', '${item.product_id}')" class="btn btn--small">Remover</button>
-      </div>
-    </article>
-  `).join('');
-
-  const total = basket.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  elements.basketTotal.innerHTML = `
-    <div class="total-summary">
-      <strong>Total: ${currencyFormatter.format(total)}</strong>
-    </div>
-  `;
 }
 
 async function restoreSession() {

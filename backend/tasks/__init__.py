@@ -7,7 +7,7 @@ Legacy task imports are kept here so existing code can continue using
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from backend.celery_app import celery_app, debug_task
 from backend.scraper import NoResultsError, ScraperError, search_lider
@@ -73,10 +73,23 @@ def search_jumbo_async(self, query: str, limit: int = 36) -> dict:
 @celery_app.task(bind=True, name="backend.tasks.backup_database")
 def backup_database(self) -> dict:
     try:
-        return {"status": "success", "timestamp": datetime.now().isoformat()}
+        from backend.backup import BackupManager
+
+        manager = BackupManager()
+        results = manager.backup_all()
+        logger.info("Backup completado: %s", results)
+        return {
+            "status": "success",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "results": results,
+        }
     except Exception as exc:
-        logger.error("Backup task failed: %s", exc, exc_info=True)
-        return {"status": "error", "error": str(exc)}
+        logger.error("Backup fallido: %s", exc, exc_info=True)
+        return {
+            "status": "error",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "error": str(exc),
+        }
 
 
 @celery_app.task(bind=True, name="backend.tasks.monitor_parser_changes")
@@ -93,15 +106,29 @@ def monitor_parser_changes(self) -> dict:
 @celery_app.task(bind=True, name="backend.tasks.cleanup_cache")
 def cleanup_cache(self) -> dict:
     try:
-        return {"status": "success", "timestamp": datetime.now().isoformat()}
+        from backend.infrastructure.cache.cache import _get_client
+
+        client = _get_client()
+        pattern = "api:search:*"
+        keys = client.keys(pattern)
+        deleted = client.delete(*keys) if keys else 0
+        logger.info("Cache limpiado: %d claves eliminadas", deleted)
+        return {
+            "status": "success",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "deleted_keys": int(deleted),
+        }
     except Exception as exc:
-        logger.error("Cache cleanup task failed: %s", exc, exc_info=True)
-        return {"status": "error", "error": str(exc)}
+        logger.error("Cleanup de cache fallido: %s", exc, exc_info=True)
+        return {
+            "status": "error",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "error": str(exc),
+        }
 
 
 def schedule_backups() -> None:
     logger.info("Backup scheduling is configured through Celery beat.")
 
 
-from backend.tasks.scrape_tasks import scrape_lider  # noqa: E402,F401
-
+from backend.tasks.scrape_tasks import monitor_scraper_health, scrape_lider  # noqa: E402,F401

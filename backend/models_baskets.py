@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 class BasketItem(BaseModel):
@@ -9,7 +9,7 @@ class BasketItem(BaseModel):
     price: float
     quantity: int = 1
     store: str
-    added_at: datetime = Field(default_factory=datetime.now)
+    added_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class Basket(BaseModel):
@@ -17,8 +17,8 @@ class Basket(BaseModel):
     name: str
     user_id: Optional[str] = None  # Para futuro sistema de usuarios
     items: List[BasketItem] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class BasketSummary(BaseModel):

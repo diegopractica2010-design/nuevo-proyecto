@@ -106,7 +106,7 @@ pytest tests/ -v
 ## API Principal
 
 - `GET /health` - Health check
-- `GET /search?query=...&store=lider` - Buscar productos
+- `GET /api/search?q=...&store=lider` - Buscar productos
 - `POST /auth/register` - Registrar usuario
 - `POST /auth/login` - Login
 - `GET /auth/me` - Usuario actual
@@ -190,6 +190,8 @@ AWS_SECRET_ACCESS_KEY=...
 ```
 
 Ver `.env.example` para lista completa.
+
+> Nunca hagas commit de `.env.production`. Copia `.env.production.example` a `.env.production` y completa los valores reales.
 
 ## Seguridad
 

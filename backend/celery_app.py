@@ -43,11 +43,18 @@ celery_app.conf.update(
 
 # Schedule periodic tasks
 celery_app.conf.beat_schedule = {
-    # Placeholder: Add scheduled tasks later (e.g., daily scraping, backups)
-    # "backup-database-daily": {
-    #     "task": "backend.tasks.backup_database",
-    #     "schedule": crontab(hour=2, minute=0),  # 2 AM daily
-    # },
+    "backup-diario-3am": {
+        "task": "backend.tasks.backup_database",
+        "schedule": crontab(hour=3, minute=0),
+    },
+    "limpieza-cache-cada-hora": {
+        "task": "backend.tasks.cleanup_cache",
+        "schedule": crontab(minute=0),
+    },
+    "monitor-scraper-cada-6h": {
+        "task": "backend.tasks.monitor_scraper_health",
+        "schedule": crontab(hour="*/6", minute=15),
+    },
 }
 
 

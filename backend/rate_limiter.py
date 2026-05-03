@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Optional
 import json
@@ -13,6 +14,12 @@ from fastapi import Request
 from backend.config import REDIS_URL, RATE_LIMIT_REQUESTS_PER_MINUTE, RATE_LIMIT_WINDOW_SECONDS
 
 logger = logging.getLogger(__name__)
+
+_TRUSTED_PROXIES: frozenset[str] = frozenset(
+    ip.strip()
+    for ip in os.getenv("TRUSTED_PROXY_IPS", "").split(",")
+    if ip.strip()
+)
 
 
 class RateLimiter:
@@ -48,12 +55,18 @@ class RateLimiter:
         return f"rate_limit:{client_id}"
     
     def _get_ip(self, request: Request) -> str:
-        """Extract client IP from request."""
-        # Check X-Forwarded-For (proxy/load balancer)
-        if request.headers.get("x-forwarded-for"):
-            return request.headers.get("x-forwarded-for").split(",")[0].strip()
-        # Fall back to direct connection IP
-        return request.client.host if request.client else "unknown"
+        """
+        Obtiene la IP real del cliente.
+
+        Solo confia en X-Forwarded-For si la conexion llega desde un proxy
+        configurado como confiable. Sin proxies configurados, usa la IP TCP.
+        """
+        client_ip = request.client.host if request.client else "unknown"
+        if _TRUSTED_PROXIES and client_ip in _TRUSTED_PROXIES:
+            forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+            if forwarded_for:
+                return forwarded_for.split(",")[0].strip()
+        return client_ip
     
     def is_rate_limited(self, request: Request) -> tuple[bool, dict]:
         """

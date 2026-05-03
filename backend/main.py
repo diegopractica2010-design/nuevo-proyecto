@@ -163,6 +163,18 @@ def health_full():
     return check
 
 
+@app.get("/health/scraper", include_in_schema=False)
+def scraper_health():
+    """Return the last saved scraper monitor status without running a new check."""
+    try:
+        from backend.parser_monitor import get_status
+
+        return get_status()
+    except Exception as exc:
+        logger.warning("scraper health check failed: %s", exc)
+        return {"status": "unavailable", "error": str(exc)}
+
+
 @app.get("/search", response_model=SearchResponse)
 def search(
     query: Optional[str] = Query(None, min_length=1, description="Nombre del producto"),
@@ -199,9 +211,11 @@ def create_basket(
 
 
 @app.get("/baskets", response_model=list[BasketSummary])
-def get_baskets(user_id: Optional[str] = None, authorization: Optional[str] = Header(None)):
-    username = _username_from_authorization(authorization)
-    owner_id = username or user_id
+def get_baskets(authorization: str = Header(...)):
+    username = _username_from_authorization(authorization, required=True)
+    if not username:
+        raise HTTPException(status_code=401, detail="Autenticacion requerida")
+    owner_id = username
     logger.info(f"Getting baskets for user: {owner_id}")
     return BasketService.get_user_baskets(owner_id)
 
@@ -451,19 +465,6 @@ def backup_status(authorization: Optional[str] = Header(None)):
 
 
 # ============================================================================
-# Static Files
-# ============================================================================
-app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
-
-
-@app.get("/", include_in_schema=False)
-def index():
-    """Serve index page."""
-    logger.info("Serving index page")
-    return FileResponse(FRONTEND_DIR / "index.html")
-
-
-# ============================================================================
 # FASE 4: Graceful Shutdown Handlers
 # ============================================================================
 @app.on_event("startup")
@@ -507,10 +508,10 @@ async def shutdown_event():
     
     # Close database connections
     try:
-        from backend.db import SessionLocal
-        db = SessionLocal()
-        db.close()
-        logger.info("Database connections closed")
+        from backend.db import engine
+
+        engine.dispose()
+        logger.info("Database connection pool disposed")
     except Exception as e:
         logger.warning(f"Error closing database: {e}")
     

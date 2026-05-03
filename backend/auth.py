@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 import secrets
-from datetime import datetime, timedelta
+import logging
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 from jose import JWTError, jwt
@@ -12,18 +13,31 @@ from backend.db import SessionLocal
 from backend.db_models import UserRecord
 from backend.repositories import UserRepository
 
+logger = logging.getLogger(__name__)
+
 
 def _get_secret_key() -> str:
-    """Obtener SECRET_KEY desde entorno o generar una nueva."""
-    secret = os.getenv("SECRET_KEY")
+    """Obtener JWT_SECRET_KEY desde entorno o generar una temporal en desarrollo."""
+    secret = os.getenv("JWT_SECRET_KEY") or os.getenv("SECRET_KEY")
     if secret:
         if len(secret) < 32:
-            raise ValueError("SECRET_KEY debe tener al menos 32 caracteres")
+            raise ValueError("JWT_SECRET_KEY debe tener al menos 32 caracteres")
         return secret
-    
-    # Generar clave segura si no existe (para desarrollo)
-    generated = secrets.token_hex(32)
-    return generated
+
+    env = os.getenv("ENVIRONMENT", "development")
+    if env == "production":
+        raise RuntimeError(
+            "JWT_SECRET_KEY no esta configurado. "
+            "El servidor no puede arrancar en produccion sin una clave JWT fija. "
+            "Agrega JWT_SECRET_KEY al entorno."
+        )
+
+    secret = secrets.token_hex(32)
+    logger.warning(
+        "JWT_SECRET_KEY no configurado. Usando clave temporal. "
+        "Los JWT se invalidaran en cada restart. Solo aceptable en desarrollo."
+    )
+    return secret
 
 
 SECRET_KEY = _get_secret_key()
@@ -73,9 +87,9 @@ class TokenService:
     def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
         to_encode = data.copy()
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = datetime.now(UTC) + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt

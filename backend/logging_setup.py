@@ -6,7 +6,7 @@ import logging
 import logging.config
 import sys
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from backend.config import LOG_LEVEL, ENVIRONMENT, DATA_DIR, SENTRY_DSN, SENTRY_ENVIRONMENT
@@ -17,7 +17,7 @@ class JSONFormatter(logging.Formatter):
     
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 from backend.db import SessionLocal
@@ -148,8 +148,11 @@ class PriceHistoryService:
             history = PriceHistoryRepository(session)
             latest = history.latest_for_product(product_id, store)
 
-            if latest and latest.price and abs(latest.price - price) / latest.price < 0.01:
-                return
+            if latest is not None:
+                if latest.price == 0:
+                    pass
+                elif abs(latest.price - price) / latest.price < 0.01:
+                    return
 
             history.create(product_id=product_id, store=store, price=price, url=url)
             session.commit()
@@ -166,7 +169,7 @@ class PriceHistoryService:
         if not history:
             return {"current_price": None, "min_price": None, "max_price": None, "trend": "stable"}
 
-        recent_history = [h for h in history if h.date > datetime.now() - timedelta(days=days)]
+        recent_history = [h for h in history if h.date > datetime.now(UTC) - timedelta(days=days)]
         if not recent_history:
             return {"current_price": None, "min_price": None, "max_price": None, "trend": "stable"}
 
