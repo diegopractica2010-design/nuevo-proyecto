@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
@@ -38,7 +38,11 @@ class StoreRecord(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUIDType(), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(160), unique=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
 
     prices: Mapped[list["PriceRecord"]] = relationship(back_populates="store")
 
@@ -52,11 +56,15 @@ class ProductRecord(Base):
     brand: Mapped[str | None] = mapped_column(String(160), index=True, nullable=True)
     quantity_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     quantity_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.now,
-        onupdate=datetime.now,
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
 
@@ -88,8 +96,11 @@ class PriceRecord(Base):
         nullable=False,
     )
     value: Mapped[float] = mapped_column(Float, nullable=False)
-    observed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
 
     product: Mapped[ProductRecord] = relationship(back_populates="prices")
     store: Mapped[StoreRecord] = relationship(back_populates="prices")
-

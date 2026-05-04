@@ -5,7 +5,6 @@ Implements automatic backups with retention policy.
 
 from __future__ import annotations
 
-import asyncio
 import gzip
 import json
 import logging
@@ -14,11 +13,8 @@ import shutil
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 from backend.config import (
-    BACKUP_ENABLED,
-    BACKUP_INTERVAL_HOURS,
     BACKUP_PATH,
     DATABASE_URL,
     REDIS_URL,
@@ -170,7 +166,6 @@ class BackupManager:
         }
         
         # Overall status
-        success = all(r[0] for r in results.values())
         logger.info(f"Backup completed: {results}")
         
         return results

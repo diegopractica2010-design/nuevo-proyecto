@@ -15,6 +15,19 @@ from backend.scraper_jumbo import search_jumbo
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "backup_database",
+    "celery_app",
+    "cleanup_cache",
+    "debug_task",
+    "monitor_parser_changes",
+    "monitor_scraper_health",
+    "schedule_backups",
+    "scrape_lider",
+    "search_jumbo_async",
+    "search_lider_async",
+]
+
 
 @celery_app.task(bind=True, max_retries=3, name="backend.tasks.search_lider_async")
 def search_lider_async(self, query: str, limit: int = 36) -> dict:

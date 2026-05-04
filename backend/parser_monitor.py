@@ -74,7 +74,9 @@ def check_store(store: str, query: str = "leche") -> dict[str, Any]:
         if product_count == 0:
             issues.append("El scraper no extrajo productos")
 
-        if html_changed and structure_detail:
+        if html_changed and structure_detail and (
+            product_count == 0 or "__NEXT_DATA__ shape:" in structure_detail
+        ):
             issues.append(f"Cambio estructural detectado: {structure_detail}")
 
         status = "degraded" if issues else "ok"
@@ -195,26 +197,32 @@ def _save_latest_snapshot(store: str, html: str) -> Path:
 def _check_structure_changed(store: str, html: str) -> tuple[bool, str]:
     try:
         html_hash = _hash_text(html)
-        next_data_hash = _extract_next_data_hash(html)
+        next_data_shape_hash = _extract_next_data_shape_hash(html)
         state = _load_state()
         prev_html_hash = state.get(f"{store}.html_hash")
-        prev_next_hash = state.get(f"{store}.next_data_hash")
+        prev_next_shape_hash = state.get(f"{store}.next_data_shape_hash")
 
         changed = False
         detail = ""
         if prev_html_hash and prev_html_hash != html_hash:
             changed = True
             detail = f"HTML hash {prev_html_hash} -> {html_hash}"
-            if next_data_hash and prev_next_hash:
-                if prev_next_hash != next_data_hash:
-                    detail += f" (__NEXT_DATA__: {prev_next_hash} -> {next_data_hash})"
+            if next_data_shape_hash:
+                if prev_next_shape_hash is None:
+                    detail += " (__NEXT_DATA__ shape baseline creado)"
+                    changed = False
+                elif prev_next_shape_hash != next_data_shape_hash:
+                    detail += (
+                        f" (__NEXT_DATA__ shape: {prev_next_shape_hash} -> "
+                        f"{next_data_shape_hash})"
+                    )
                 else:
-                    detail += " (__NEXT_DATA__ sin cambios)"
+                    detail += " (__NEXT_DATA__ shape sin cambios)"
                     changed = False
 
         state[f"{store}.html_hash"] = html_hash
-        if next_data_hash:
-            state[f"{store}.next_data_hash"] = next_data_hash
+        if next_data_shape_hash:
+            state[f"{store}.next_data_shape_hash"] = next_data_shape_hash
         _save_state(state)
         return changed, detail
     except Exception as exc:
@@ -222,12 +230,33 @@ def _check_structure_changed(store: str, html: str) -> tuple[bool, str]:
         return False, f"check fallo: {exc}"
 
 
-def _extract_next_data_hash(html: str) -> str | None:
+def _extract_next_data_shape_hash(html: str) -> str | None:
     soup = BeautifulSoup(html, "html.parser")
     script = soup.find("script", {"id": "__NEXT_DATA__"})
     if not script or not script.string:
         return None
-    return _hash_text(script.string)
+    try:
+        payload = json.loads(script.string)
+    except json.JSONDecodeError:
+        return _hash_text(script.string)
+    signature = _shape_signature(payload)
+    return _hash_text(json.dumps(signature, sort_keys=True, ensure_ascii=False))
+
+
+def _shape_signature(value: Any, depth: int = 0, max_depth: int = 8) -> Any:
+    if depth > max_depth:
+        return type(value).__name__
+    if isinstance(value, dict):
+        return {
+            key: _shape_signature(child, depth + 1, max_depth)
+            for key, child in sorted(value.items(), key=lambda item: item[0])
+        }
+    if isinstance(value, list):
+        if not value:
+            return []
+        sample = value[:3]
+        return [_shape_signature(child, depth + 1, max_depth) for child in sample]
+    return type(value).__name__
 
 
 def _hash_text(text: str) -> str:

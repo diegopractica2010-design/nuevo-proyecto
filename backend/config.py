@@ -2,11 +2,13 @@ import os
 from pathlib import Path
 from functools import lru_cache
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import ConfigDict, field_validator
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
+
+    model_config = ConfigDict(env_file=".env", case_sensitive=True)
     
     # Paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent
@@ -154,10 +156,6 @@ class Settings(BaseSettings):
         if normalized in {"0", "false", "no", "off", "release", "production"}:
             return False
         return False
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
 
 
 # Singleton instance

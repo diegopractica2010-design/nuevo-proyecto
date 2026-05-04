@@ -6,7 +6,6 @@ import logging
 import os
 import time
 from typing import Optional
-import json
 
 import redis
 from fastapi import Request

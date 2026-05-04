@@ -76,7 +76,7 @@ class HealthChecker:
         try:
             with SessionLocal() as session:
                 # Execute simple query
-                result = session.execute(text("SELECT 1")).scalar()
+                session.execute(text("SELECT 1")).scalar()
                 return {
                     "status": "ok",
                     "connected": True,
@@ -104,7 +104,7 @@ class HealthChecker:
                 )
                 lider_time = time.time() - start
                 lider_status = "ok" if response.status_code == 200 else "error"
-            except Exception as e:
+            except Exception:
                 lider_status = "error"
                 lider_time = None
             
@@ -118,7 +118,7 @@ class HealthChecker:
                 )
                 jumbo_time = time.time() - start
                 jumbo_status = "ok" if response.status_code == 200 else "error"
-            except Exception as e:
+            except Exception:
                 jumbo_status = "error"
                 jumbo_time = None
             

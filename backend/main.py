@@ -1,8 +1,8 @@
 import logging
 import signal
-import json
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Body, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,12 +33,60 @@ from backend.security import SecurityHeadersMiddleware
 from backend.metrics import (
     metrics_middleware,
     get_metrics_response,
-    record_search_request,
-    record_search_duration,
 )
 from backend.backup import BackupManager
 
 logger = logging.getLogger(__name__)
+
+
+async def _startup_event() -> None:
+    """Initialize startup-only resources."""
+    logger.info("=" * 80)
+    logger.info("Radar de Precios - Fase 4 (Produccion & Operacion)")
+    logger.info(f"Started at {datetime.now(UTC).isoformat()}")
+    logger.info("=" * 80)
+
+    try:
+        from backend.tasks import schedule_backups
+
+        schedule_backups()
+        logger.info("Backup scheduler started")
+    except Exception as e:
+        logger.warning(f"Failed to start backup scheduler: {e}")
+
+
+async def _shutdown_event() -> None:
+    """Cleanup resources gracefully on shutdown."""
+    logger.info("=" * 80)
+    logger.info("Shutting down Radar de Precios...")
+    logger.info("=" * 80)
+
+    try:
+        logger.info("Waiting for pending Celery tasks...")
+        from backend.celery_app import celery_app
+
+        celery_app.control.inspect().active()
+    except Exception as e:
+        logger.warning(f"Error waiting for Celery tasks: {e}")
+
+    try:
+        from backend.db import engine
+
+        engine.dispose()
+        logger.info("Database connection pool disposed")
+    except Exception as e:
+        logger.warning(f"Error closing database: {e}")
+
+    logger.info("Shutdown complete")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _startup_event()
+    try:
+        yield
+    finally:
+        await _shutdown_event()
 
 # ============================================================================
 # FastAPI App Initialization
@@ -46,7 +94,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Radar de Precios",
     version="0.4.0-phase4",
-    description="Comparador de precios de supermercados chilenos (Fase 4: Producción & Operación)"
+    description="Comparador de precios de supermercados chilenos (Fase 4: Produccion & Operacion)",
+    lifespan=lifespan,
 )
 
 # ============================================================================
@@ -142,7 +191,6 @@ def health_live():
     """Liveness probe (K8s ready)."""
     checker = get_health_checker()
     check = checker.check_live()
-    status_code = 200 if check.get("status") == "ok" else 503
     return check
 
 
@@ -151,7 +199,6 @@ def health_ready():
     """Readiness probe (K8s ready)."""
     checker = get_health_checker()
     check = checker.check_ready()
-    status_code = 200 if check.get("ready") else 503
     return check
 
 
@@ -462,60 +509,6 @@ def backup_status(authorization: Optional[str] = Header(None)):
     except Exception as e:
         logger.error(f"Failed to get backup status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================================
-# FASE 4: Graceful Shutdown Handlers
-# ============================================================================
-@app.on_event("startup")
-async def startup_event():
-    """Startup event - initialize resources."""
-    logger.info("=" * 80)
-    logger.info("Radar de Precios - Fase 4 (Producción & Operación)")
-    logger.info(f"Started at {datetime.now(UTC).isoformat()}")
-    logger.info("=" * 80)
-    
-    # Start backup scheduler if enabled
-    try:
-        from backend.tasks import schedule_backups
-        schedule_backups()
-        logger.info("Backup scheduler started")
-    except Exception as e:
-        logger.warning(f"Failed to start backup scheduler: {e}")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Shutdown event - cleanup resources gracefully."""
-    logger.info("=" * 80)
-    logger.info("Shutting down Radar de Precios...")
-    logger.info("=" * 80)
-    
-    # Graceful shutdown steps:
-    # 1. Stop accepting new requests (handled by FastAPI)
-    # 2. Wait for pending tasks
-    # 3. Close database connections
-    # 4. Close Redis connections
-    
-    try:
-        # Wait for Celery tasks to complete
-        logger.info("Waiting for pending Celery tasks...")
-        # In production, use timeout and force kill if needed
-        from backend.celery_app import celery_app
-        celery_app.control.inspect().active()  # Wait for active tasks
-    except Exception as e:
-        logger.warning(f"Error waiting for Celery tasks: {e}")
-    
-    # Close database connections
-    try:
-        from backend.db import engine
-
-        engine.dispose()
-        logger.info("Database connection pool disposed")
-    except Exception as e:
-        logger.warning(f"Error closing database: {e}")
-    
-    logger.info("Shutdown complete")
 
 
 # ============================================================================

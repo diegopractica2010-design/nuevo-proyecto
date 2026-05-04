@@ -7,7 +7,6 @@ import sys
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 from contextvars import ContextVar
 
 from fastapi import Request

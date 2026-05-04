@@ -9,7 +9,7 @@ import logging
 import re
 from typing import Optional
 
-from fastapi import Request, HTTPException
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
@@ -166,7 +166,7 @@ class OriginValidator:
     def log_invalid_origin(self, origin: str, path: str):
         """Log suspicious origin attempts."""
         logger.warning(
-            f"Invalid CORS origin attempt",
+            "Invalid CORS origin attempt",
             extra={
                 "origin": origin,
                 "path": path,

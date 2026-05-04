@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import logging
 import logging.config
-import sys
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 from backend.config import LOG_LEVEL, ENVIRONMENT, DATA_DIR, SENTRY_DSN, SENTRY_ENVIRONMENT
 

@@ -10,6 +10,12 @@ from backend.models_baskets import Basket, BasketItem, BasketSummary, PriceHisto
 from backend.repositories import BasketRepository, PriceHistoryRepository
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _to_basket_item(record: BasketItemRecord) -> BasketItem:
     return BasketItem(
         product_id=record.product_id,
@@ -17,7 +23,7 @@ def _to_basket_item(record: BasketItemRecord) -> BasketItem:
         price=record.price,
         quantity=record.quantity,
         store=record.store,
-        added_at=record.added_at,
+        added_at=_as_utc(record.added_at),
     )
 
 
@@ -27,8 +33,8 @@ def _to_basket(record: BasketRecord) -> Basket:
         name=record.name,
         user_id=record.user_id,
         items=[_to_basket_item(item) for item in record.items],
-        created_at=record.created_at,
-        updated_at=record.updated_at,
+        created_at=_as_utc(record.created_at),
+        updated_at=_as_utc(record.updated_at),
     )
 
 
@@ -37,7 +43,7 @@ def _to_price_history(record: PriceHistoryRecord) -> PriceHistory:
         product_id=record.product_id,
         store=record.store,
         price=record.price,
-        date=record.date,
+        date=_as_utc(record.date),
         url=record.url,
     )
 
@@ -169,7 +175,8 @@ class PriceHistoryService:
         if not history:
             return {"current_price": None, "min_price": None, "max_price": None, "trend": "stable"}
 
-        recent_history = [h for h in history if h.date > datetime.now(UTC) - timedelta(days=days)]
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        recent_history = [h for h in history if _as_utc(h.date) > cutoff]
         if not recent_history:
             return {"current_price": None, "min_price": None, "max_price": None, "trend": "stable"}
 
