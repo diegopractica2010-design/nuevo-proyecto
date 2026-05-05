@@ -8,6 +8,7 @@ from threading import Thread
 from threading import Lock
 
 from backend.config import CACHE_TTL_SECONDS, MAX_RESULTS, STALE_CACHE_TTL_SECONDS
+from backend.compliance import ComplianceError
 from backend.models import (
     FacetValue,
     PriceRange,
@@ -154,6 +155,13 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
     if cached:
         return cached
 
+    if store == "lider" and limit <= 36:
+        _start_publish_thread(store, normalized_query, limit)
+        return _empty_response(
+            normalized_query,
+            warning="Busqueda encolada. Vuelve a intentar en unos segundos.",
+        )
+
     # Si no hay cache fresco, intentar traer datos frescos
     logger.info("Ejecutando búsqueda en vivo para query=%s, store=%s", normalized_query, store)
     
@@ -180,6 +188,12 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
             logger.warning("Búsqueda sin resultados para query=%s", normalized_query)
             return _empty_response(normalized_query, warning=None)
             
+    except ComplianceError as exc:
+        logger.warning("Busqueda bloqueada por cumplimiento: %s", exc)
+        return _empty_response(
+            normalized_query,
+            warning=str(exc),
+        )
     except Exception as exc:
         logger.error("Error en búsqueda: %s", exc, exc_info=True)
         
@@ -237,6 +251,10 @@ def _start_sync_scrape_thread(store: str, query: str, limit: int) -> None:
     thread.start()
 
 
+def _start_publish_thread(store: str, query: str, limit: int) -> None:
+    _start_sync_scrape_thread(store, query, limit)
+
+
 def _execute_scrape_sync(store: str, query: str, limit: int) -> None:
     """Ejecuta scraper directamente sin Celery."""
     try:
@@ -267,6 +285,7 @@ def _execute_scrape_sync(store: str, query: str, limit: int) -> None:
 
 def _build_response_from_scrape(query: str, results: list, store: str) -> SearchResponse:
     """Construye SearchResponse a partir de productos scrapeados."""
+    from backend.shopping_list_service import is_specific_query, select_best_products
     
     products = []
     min_price = None
@@ -312,6 +331,13 @@ def _build_response_from_scrape(query: str, results: list, store: str) -> Search
             max_price = price
         
         products.append(product_dict)
+
+    if is_specific_query(query):
+        refined_products = select_best_products(products, query)
+        if refined_products:
+            products = refined_products
+            min_price = min(float(product.get("price", 0) or 0) for product in products)
+            max_price = max(float(product.get("price", 0) or 0) for product in products)
     
     return SearchResponse(
         query=query,

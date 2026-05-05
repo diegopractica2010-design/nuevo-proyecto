@@ -2,6 +2,7 @@ const STORAGE_KEYS = {
   favorites: "radar-precios-favorites-v2",
   history: "radar-precios-history-v2",
   authToken: "radar-precios-auth-token-v1",
+  shoppingList: "radar-precios-shopping-list-v1",
 };
 
 const QUICK_QUERIES = [
@@ -69,6 +70,10 @@ const state = {
   store: "lider",
   currentBasket: null,
   baskets: [],
+  shoppingList: loadJSON(STORAGE_KEYS.shoppingList, []),
+  shoppingCompare: null,
+  shoppingLoading: false,
+  shoppingError: "",
   authToken: localStorage.getItem(STORAGE_KEYS.authToken) || "",
   currentUser: null,
 };
@@ -112,7 +117,17 @@ const elements = {
   activeFiltersLabel: document.getElementById("active-filters-label"),
   sourceLink: document.getElementById("source-link"),
   resultsGrid: document.getElementById("results-grid"),
+  shoppingListForm: document.getElementById("shopping-list-form"),
+  shoppingItemInput: document.getElementById("shopping-item-input"),
+  shoppingListPaste: document.getElementById("shopping-list-paste"),
+  importShoppingListButton: document.getElementById("import-shopping-list-button"),
+  clearShoppingListButton: document.getElementById("clear-shopping-list-button"),
+  compareShoppingListButton: document.getElementById("compare-shopping-list-button"),
+  shoppingListItems: document.getElementById("shopping-list-items"),
+  shoppingListStatus: document.getElementById("shopping-list-status"),
+  shoppingListResults: document.getElementById("shopping-list-results"),
   // Elementos de canastas
+  searchLink: document.getElementById("search-link"),
   basketsLink: document.getElementById("baskets-link"),
   basketsSection: document.getElementById("baskets-section"),
   newBasketBtn: document.getElementById("new-basket-btn"),
@@ -154,6 +169,23 @@ function bindEvents() {
     performSearch(elements.input.value);
   });
 
+  elements.shoppingListForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    addShoppingListItem(elements.shoppingItemInput.value);
+  });
+
+  elements.importShoppingListButton.addEventListener("click", () => {
+    importShoppingListLines();
+  });
+
+  elements.clearShoppingListButton.addEventListener("click", () => {
+    clearShoppingList();
+  });
+
+  elements.compareShoppingListButton.addEventListener("click", () => {
+    compareShoppingList();
+  });
+
   elements.authForm.addEventListener("submit", (event) => {
     event.preventDefault();
     login();
@@ -168,14 +200,16 @@ function bindEvents() {
   });
 
   elements.storeSelect.addEventListener("change", (event) => {
-    state.store = event.target.value;
+    selectStore(event.target.value);
     // Si hay una búsqueda activa, volver a buscar en la nueva tienda
-    if (state.query) {
-      performSearch(state.query);
-    }
   });
 
   // Event listeners para canastas
+  elements.searchLink.addEventListener("click", (event) => {
+    event.preventDefault();
+    showSearch();
+  });
+
   elements.basketsLink.addEventListener("click", (event) => {
     event.preventDefault();
     showBaskets();
@@ -264,6 +298,11 @@ function bindEvents() {
       return;
     }
 
+    if (action === "select-store") {
+      selectStore(trigger.dataset.store || "lider");
+      return;
+    }
+
     if (action === "toggle-favorite") {
       const key = trigger.dataset.key;
       if (key) {
@@ -310,6 +349,18 @@ function bindEvents() {
       return;
     }
 
+    if (action === "remove-shopping-item") {
+      removeShoppingListItem(Number(trigger.dataset.index));
+      return;
+    }
+
+    if (action === "search-shopping-item") {
+      const query = trigger.dataset.query || "";
+      elements.input.value = query;
+      performSearch(query);
+      return;
+    }
+
     if (action === "view-basket") {
       viewBasket(trigger.dataset.basketId);
       return;
@@ -333,6 +384,23 @@ function bindEvents() {
     if (action === "update-basket-quantity") {
       updateBasketQuantity(trigger.dataset.basketId, trigger.dataset.productId);
     }
+  });
+}
+
+function selectStore(store) {
+  state.store = STORE_CONFIG[store] ? store : "lider";
+  elements.storeSelect.value = state.store;
+  renderStoreControls();
+  if (state.query) {
+    performSearch(state.query);
+  }
+}
+
+function renderStoreControls() {
+  document.querySelectorAll("[data-action='select-store']").forEach((button) => {
+    const active = button.dataset.store === state.store;
+    button.classList.toggle("is-active", active);
+    button.classList.toggle("topbar__pill--ghost", !active);
   });
 }
 
@@ -435,13 +503,203 @@ async function performSearch(query) {
 }
 
 function renderAll() {
+  renderStoreControls();
   renderHeroStats();
   renderSidePanels();
+  renderShoppingList();
+  renderShoppingListResults();
   renderFilters();
   renderFeedback();
   renderSuggestions();
   renderSummary();
   renderResults();
+}
+
+function addShoppingListItem(value) {
+  const query = (value || "").trim().replace(/\s+/g, " ");
+  if (!query) {
+    return;
+  }
+  const exists = state.shoppingList.some((item) => item.query.toLowerCase() === query.toLowerCase());
+  if (!exists) {
+    state.shoppingList.push({ query, quantity: 1 });
+    persistShoppingList();
+  }
+  elements.shoppingItemInput.value = "";
+  state.shoppingCompare = null;
+  state.shoppingError = "";
+  renderShoppingList();
+  renderShoppingListResults();
+}
+
+function importShoppingListLines() {
+  const lines = elements.shoppingListPaste.value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  lines.forEach((line) => addShoppingListItem(line));
+  elements.shoppingListPaste.value = "";
+}
+
+function removeShoppingListItem(index) {
+  if (!Number.isInteger(index) || index < 0 || index >= state.shoppingList.length) {
+    return;
+  }
+  state.shoppingList.splice(index, 1);
+  state.shoppingCompare = null;
+  persistShoppingList();
+  renderShoppingList();
+  renderShoppingListResults();
+}
+
+function clearShoppingList() {
+  state.shoppingList = [];
+  state.shoppingCompare = null;
+  state.shoppingError = "";
+  persistShoppingList();
+  renderShoppingList();
+  renderShoppingListResults();
+}
+
+function persistShoppingList() {
+  localStorage.setItem(STORAGE_KEYS.shoppingList, JSON.stringify(state.shoppingList));
+}
+
+function renderShoppingList() {
+  const count = state.shoppingList.length;
+  elements.compareShoppingListButton.disabled = !count || state.shoppingLoading;
+  elements.shoppingListStatus.textContent = state.shoppingLoading
+    ? "Comparando lista en Lider y Jumbo..."
+    : count
+      ? `${count} producto${count === 1 ? "" : "s"} listos para comparar.`
+      : "Agrega productos para comparar Lider y Jumbo.";
+
+  elements.shoppingListItems.innerHTML = count
+    ? state.shoppingList
+        .map(
+          (item, index) => `
+            <div class="shopping-list-item">
+              <span>${escapeHtml(item.query)}</span>
+              <div class="shopping-list-item__actions">
+                <button type="button" data-action="search-shopping-item" data-query="${escapeAttribute(item.query)}">Ver</button>
+                <button type="button" data-action="remove-shopping-item" data-index="${index}">Quitar</button>
+              </div>
+            </div>
+          `
+        )
+        .join("")
+    : `<div class="saved-empty">Tu lista esta vacia.</div>`;
+}
+
+async function compareShoppingList() {
+  if (!state.shoppingList.length || state.shoppingLoading) {
+    return;
+  }
+
+  state.shoppingLoading = true;
+  state.shoppingError = "";
+  state.shoppingCompare = null;
+  renderShoppingList();
+  renderShoppingListResults();
+
+  try {
+    const response = await fetch("/shopping-list/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: state.shoppingList }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "No se pudo comparar la lista.");
+    }
+    state.shoppingCompare = data;
+  } catch (error) {
+    state.shoppingError = error.message || "No se pudo comparar la lista.";
+  } finally {
+    state.shoppingLoading = false;
+    renderShoppingList();
+    renderShoppingListResults();
+  }
+}
+
+function renderShoppingListResults() {
+  if (state.shoppingLoading) {
+    elements.shoppingListResults.innerHTML = `
+      <article class="feedback-card">
+        <strong>Buscando lista completa</strong>
+        <span>Consultando Lider y Jumbo para cada producto.</span>
+      </article>
+    `;
+    return;
+  }
+
+  if (state.shoppingError) {
+    elements.shoppingListResults.innerHTML = `
+      <article class="feedback-card feedback-card--error">
+        <strong>No se pudo comparar</strong>
+        <span>${escapeHtml(state.shoppingError)}</span>
+      </article>
+    `;
+    return;
+  }
+
+  if (!state.shoppingCompare) {
+    elements.shoppingListResults.innerHTML = "";
+    return;
+  }
+
+  const items = Array.isArray(state.shoppingCompare.items) ? state.shoppingCompare.items : [];
+  const rows = items
+    .map((item) => renderShoppingCompareRow(item))
+    .join("");
+
+  elements.shoppingListResults.innerHTML = `
+    <section class="panel shopping-results-panel">
+      <div class="panel__header">
+        <div>
+          <p class="eyebrow eyebrow--small">Resultado de lista</p>
+          <h2>${state.shoppingCompare.matched_count || 0} de ${state.shoppingCompare.count || 0} encontrados</h2>
+        </div>
+        <strong class="shopping-total">${formatPrice(state.shoppingCompare.estimated_total || 0)}</strong>
+      </div>
+      <div class="shopping-result-list">${rows}</div>
+    </section>
+  `;
+}
+
+function renderShoppingCompareRow(item) {
+  const cheapest = item.cheapest;
+  const storeCards = (item.stores || [])
+    .map((storeResult) => {
+      const product = storeResult.best;
+      return `
+        <div class="store-option${cheapest && product && getProductKey(product) === getProductKey(cheapest) ? " is-best" : ""}">
+          <span class="badge">${escapeHtml(getStoreConfig(storeResult.store).label)}</span>
+          ${
+            product
+              ? `
+                <strong>${formatPrice(product.price)}</strong>
+                <span>${escapeHtml(product.name)}</span>
+              `
+              : `<span>No encontrado</span>`
+          }
+        </div>
+      `;
+    })
+    .join("");
+
+  return `
+    <article class="shopping-result-row">
+      <div class="shopping-result-row__head">
+        <div>
+          <strong>${escapeHtml(item.query)}</strong>
+          <span>${cheapest ? `Mejor: ${escapeHtml(getStoreConfig(cheapest.source).label)}` : "Sin coincidencias confiables"}</span>
+        </div>
+        ${cheapest ? `<strong>${formatPrice(cheapest.price)}</strong>` : ""}
+      </div>
+      <div class="store-options">${storeCards}</div>
+    </article>
+  `;
 }
 
 function renderQuickTags() {
@@ -876,6 +1134,12 @@ async function showBaskets() {
   try {
     const response = await fetchWithAuth('/baskets');
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403 || response.status === 422) {
+        state.baskets = [];
+        elements.basketOwnerLabel.textContent = "Inicia sesion para usar canastas guardadas";
+        renderBaskets();
+        return;
+      }
       throw new Error("No se pudieron cargar las canastas.");
     }
     const baskets = await response.json();
@@ -890,6 +1154,13 @@ async function showBaskets() {
   }
 }
 
+function showSearch() {
+  document.querySelector('.layout').style.display = 'grid';
+  elements.basketsSection.style.display = 'none';
+  elements.basketDetail.style.display = 'none';
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 function renderBaskets() {
   elements.basketDetail.style.display = 'none';
   elements.basketsList.style.display = 'grid';
@@ -902,7 +1173,7 @@ function renderBaskets() {
         <span>${basket.stores.length ? escapeHtml(basket.stores.join(', ')) : 'Sin tiendas'}</span>
       </div>
     </article>
-  `).join('') : `<div class="saved-empty">Crea una canasta para empezar a guardar productos.</div>`;
+  `).join('') : `<div class="saved-empty">${state.currentUser ? "Crea una canasta para empezar a guardar productos." : "Inicia sesion o crea un usuario para usar canastas guardadas."}</div>`;
 }
 
 async function createBasket(name) {
@@ -973,7 +1244,7 @@ async function login() {
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.detail || "No se pudo iniciar sesion.");
+      throw new Error(formatApiError(data.detail) || "No se pudo iniciar sesion.");
     }
     state.authToken = data.access_token;
     localStorage.setItem(STORAGE_KEYS.authToken, state.authToken);
@@ -1000,7 +1271,7 @@ async function register() {
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.detail || "No se pudo crear el usuario.");
+      throw new Error(formatApiError(data.detail) || "No se pudo crear el usuario.");
     }
     await login();
   } catch (error) {
@@ -1042,6 +1313,19 @@ function fetchWithAuth(url, options = {}) {
     headers.set("Authorization", `Bearer ${state.authToken}`);
   }
   return fetch(url, { ...options, headers });
+}
+
+function formatApiError(detail) {
+  if (!detail) {
+    return "";
+  }
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item.msg || item.message || String(item)).join(" ");
+  }
+  return detail.msg || detail.message || JSON.stringify(detail);
 }
 
 async function showBasketsForCache() {

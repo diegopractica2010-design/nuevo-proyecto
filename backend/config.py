@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     MAX_RESULTS: int = int(os.getenv("MAX_RESULTS", "200"))
     AUTOCOMPLETE_LIMIT: int = int(os.getenv("AUTOCOMPLETE_LIMIT", "6"))
     SUGGESTION_FALLBACK_LIMIT: int = int(os.getenv("SUGGESTION_FALLBACK_LIMIT", "3"))
+
+    # Legal/compliance guardrails. Keep live store access disabled unless you have
+    # written authorization or a provider-approved integration.
+    COMPLIANCE_STRICT_MODE: bool = os.getenv("COMPLIANCE_STRICT_MODE", "true").lower() == "true"
+    LIVE_STORE_QUERIES_ENABLED: bool = os.getenv("LIVE_STORE_QUERIES_ENABLED", "false").lower() == "true"
+    STORE_CRAWLING_ENABLED: bool = os.getenv("STORE_CRAWLING_ENABLED", "false").lower() == "true"
+    STORE_ROBOTS_ALLOW_ON_ERROR: bool = os.getenv("STORE_ROBOTS_ALLOW_ON_ERROR", "false").lower() == "true"
+    STORE_ACCESS_CONTACT: str = os.getenv("STORE_ACCESS_CONTACT", "")
     
     # Cache
     CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "180"))
@@ -115,7 +123,10 @@ class Settings(BaseSettings):
     PAGERDUTY_INTEGRATION_KEY: str = os.getenv("PAGERDUTY_INTEGRATION_KEY", "")
     
     # Headers for scraping
-    USER_AGENT: str = "Mozilla/5.0"
+    USER_AGENT: str = os.getenv(
+        "USER_AGENT",
+        "RadarPreciosBot/0.1 (+contacto-configurar-en-STORE_ACCESS_CONTACT)",
+    )
     
     BROWSER_HEADERS: dict[str, str] = {
         "User-Agent": USER_AGENT,
@@ -192,6 +203,11 @@ REQUEST_TIMEOUT = settings.REQUEST_TIMEOUT
 MAX_RESULTS = settings.MAX_RESULTS
 AUTOCOMPLETE_LIMIT = settings.AUTOCOMPLETE_LIMIT
 SUGGESTION_FALLBACK_LIMIT = settings.SUGGESTION_FALLBACK_LIMIT
+COMPLIANCE_STRICT_MODE = settings.COMPLIANCE_STRICT_MODE
+LIVE_STORE_QUERIES_ENABLED = settings.LIVE_STORE_QUERIES_ENABLED
+STORE_CRAWLING_ENABLED = settings.STORE_CRAWLING_ENABLED
+STORE_ROBOTS_ALLOW_ON_ERROR = settings.STORE_ROBOTS_ALLOW_ON_ERROR
+STORE_ACCESS_CONTACT = settings.STORE_ACCESS_CONTACT
 CACHE_TTL_SECONDS = settings.CACHE_TTL_SECONDS
 STALE_CACHE_TTL_SECONDS = settings.STALE_CACHE_TTL_SECONDS
 REDIS_URL = settings.REDIS_URL

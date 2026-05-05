@@ -81,7 +81,8 @@ class _FakeSession:
 def test_jumbo_api_search_paginates_until_limit():
     session = _FakeSession()
 
-    result = _execute_catalog_api_query(session, "arroz", limit=2)
+    with patch("backend.scraper_jumbo.assert_live_store_access_allowed"):
+        result = _execute_catalog_api_query(session, "arroz", limit=2)
 
     assert [product["sku"] for product in result.products] == ["sku-1", "sku-2"]
     assert session.calls == [1, 2]

@@ -6,6 +6,7 @@ from typing import Iterable
 
 from backend.scraper import ScraperError, search_lider
 from backend.scraper_jumbo import search_jumbo
+from backend.compliance import ComplianceError
 
 
 DEFAULT_LIDER_SEEDS = [
@@ -95,6 +96,10 @@ def index_lider_catalog(
     per_seed_limit: int = 600,
     max_products: int | None = None,
 ) -> CatalogIndexResult:
+    raise ComplianceError(
+        "La indexacion masiva de Lider esta deshabilitada para respetar politicas/robots.txt. "
+        "Usa una fuente autorizada o permiso escrito antes de habilitarla."
+    )
     products: list[dict] = []
     seen: set[str] = set()
     errors: list[str] = []
@@ -137,6 +142,10 @@ def index_jumbo_catalog(
     query: str = "",
     max_products: int = 5000,
 ) -> CatalogIndexResult:
+    raise ComplianceError(
+        "La indexacion masiva de Jumbo esta deshabilitada para respetar politicas/robots.txt. "
+        "Usa una fuente autorizada o permiso escrito antes de habilitarla."
+    )
     result = search_jumbo(query, limit=max_products)
     products: list[dict] = []
     seen: set[str] = set()

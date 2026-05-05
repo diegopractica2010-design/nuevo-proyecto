@@ -22,6 +22,7 @@ from backend.celery_app import init_celery
 from backend.health_check import get_health_checker
 from backend.models import SearchResponse
 from backend.search_service import SearchServiceError, search_products
+from backend.compliance import ComplianceError
 from backend.basket_service import BasketService, PriceHistoryService
 from backend.models_baskets import Basket, BasketSummary
 from backend.auth import AuthService, TokenService
@@ -255,9 +256,32 @@ def catalog_index(
         return index_store_catalog(store, max_products=max_products).to_dict()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ComplianceError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         logger.error("Catalog index error for %s: %s", store, exc)
         raise HTTPException(status_code=502, detail="No se pudo indexar el catalogo") from exc
+
+
+@app.post("/shopping-list/compare")
+def compare_shopping_list_endpoint(payload: dict = Body(...)):
+    from backend.shopping_list_service import compare_shopping_list, parse_shopping_items
+
+    raw_items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(raw_items, list):
+        raise HTTPException(status_code=422, detail="El payload debe incluir items como lista")
+
+    items = parse_shopping_items(raw_items)
+    if not items:
+        raise HTTPException(status_code=422, detail="Agrega al menos un producto a la lista")
+    if len(items) > 40:
+        raise HTTPException(status_code=422, detail="La lista puede tener hasta 40 productos")
+
+    try:
+        return compare_shopping_list(items)
+    except Exception as exc:
+        logger.error("Shopping list compare error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="No se pudo comparar la lista") from exc
 
 
 # Endpoints de canastas
@@ -277,8 +301,6 @@ def create_basket(
 @app.get("/baskets", response_model=list[BasketSummary])
 def get_baskets(authorization: str = Header(...)):
     username = _username_from_authorization(authorization, required=True)
-    if not username:
-        raise HTTPException(status_code=401, detail="Autenticacion requerida")
     owner_id = username
     logger.info(f"Getting baskets for user: {owner_id}")
     return BasketService.get_user_baskets(owner_id)

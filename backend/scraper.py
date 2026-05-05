@@ -19,7 +19,28 @@ from backend.config import (
     SLUG_URL,
     SUGGESTION_FALLBACK_LIMIT,
 )
+from backend.compliance import assert_live_store_access_allowed
 from backend.parser import parse_catalog_page
+
+
+QUERY_STOPWORDS = {
+    "de",
+    "del",
+    "la",
+    "las",
+    "el",
+    "los",
+    "un",
+    "una",
+    "unos",
+    "unas",
+    "saco",
+    "bolsa",
+    "paquete",
+    "pack",
+}
+
+CHARCOAL_TERMS = {"briqueta", "briquetas", "vegetal", "quincho", "quebracho", "espino"}
 
 
 class ScraperError(RuntimeError):
@@ -84,6 +105,63 @@ def _slugify_query(query: str) -> str:
     return "-".join(part for part in ascii_query.lower().split() if part)
 
 
+def fallback_query_variants(query: str) -> list[str]:
+    normalized = normalize_query(query)
+    ascii_query = unicode_normalize("NFKD", normalized).encode("ascii", "ignore").decode("ascii")
+    variants: list[str] = []
+    seen = {normalized.lower()}
+
+    def add(value: str) -> None:
+        cleaned = normalize_query(value)
+        key = cleaned.lower()
+        if cleaned and key not in seen:
+            seen.add(key)
+            variants.append(cleaned)
+
+    if ascii_query.lower() != normalized.lower():
+        add(ascii_query)
+
+    tokens = [token for token in ascii_query.lower().split() if token not in QUERY_STOPWORDS]
+    if tokens:
+        add(" ".join(tokens))
+        if len(tokens) > 1:
+            add(tokens[-1])
+
+    if "tallarines" in ascii_query.lower():
+        add(ascii_query.lower().replace("tallarines", "tallarin"))
+        add("tallarin")
+
+    return variants
+
+
+def _rank_text(value: Any) -> str:
+    text = unicode_normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    return text.lower()
+
+
+def rank_products_for_query(products: list[dict], query: str) -> list[dict]:
+    ascii_query = _rank_text(query)
+    tokens = [token for token in ascii_query.split() if token not in QUERY_STOPWORDS]
+    if not tokens:
+        return products
+
+    def score(product: dict) -> int:
+        haystack = _rank_text(
+            " ".join(
+                str(product.get(key) or "")
+                for key in ("name", "brand", "category", "seller")
+            )
+        )
+        value = sum(10 for token in tokens if token in haystack)
+        if all(token in haystack for token in tokens):
+            value += 20
+        if "carbon" in tokens and any(term in haystack for term in CHARCOAL_TERMS):
+            value += 8
+        return value
+
+    return sorted(products, key=score, reverse=True)
+
+
 def _is_blocked_page(html: str) -> bool:
     markers = (
         "Robot or human?",
@@ -102,6 +180,11 @@ def _request_text(url: str, headers: dict[str, str]) -> tuple[str, str]:
 
 def fetch_autocomplete_terms(query: str) -> list[str]:
     normalized_query = normalize_query(query)
+    assert_live_store_access_allowed(
+        "lider",
+        f"{AUTOCOMPLETE_URL}?term={quote_plus(normalized_query)}",
+        purpose="search",
+    )
     session = _build_session(API_HEADERS)
     try:
         response = session.get(
@@ -173,6 +256,7 @@ def _fetch_catalog_page(query: str, page: int, limit: int) -> ScrapedSearchResul
 
     for strategy_name, url, headers in _candidate_pages(normalized_query, page):
         try:
+            assert_live_store_access_allowed("lider", url, purpose="search")
             html, resolved_url = _request_text(url, headers)
             if _is_blocked_page(html):
                 attempts.append(f"{strategy_name}: bloqueado por anti-bot")
@@ -212,7 +296,7 @@ def _execute_catalog_query(query: str, limit: int) -> ScrapedSearchResult:
     while len(products) < limit:
         try:
             page_result = _fetch_catalog_page(normalized_query, page, limit)
-        except NoResultsError:
+        except (NoResultsError, ScraperError):
             if products:
                 break
             raise
@@ -242,10 +326,12 @@ def _execute_catalog_query(query: str, limit: int) -> ScrapedSearchResult:
     if not products:
         raise NoResultsError(normalized_query)
 
+    ranked_products = rank_products_for_query(products[:limit], normalized_query)
+
     return ScrapedSearchResult(
         query=normalized_query,
         applied_query=normalized_query,
-        products=products[:limit],
+        products=ranked_products,
         source_url=source_url or SEARCH_URL.format(query=quote_plus(normalized_query)),
         fetch_strategy=" + ".join(fetch_strategies),
         parse_strategy=parse_strategy or "unknown",
@@ -267,7 +353,8 @@ def search_lider(query: str, limit: int) -> ScrapedSearchResult:
             if term.lower() != normalized_query.lower()
         ][:SUGGESTION_FALLBACK_LIMIT]
 
-        for term in fallback_terms:
+        query_variants = fallback_query_variants(normalized_query)
+        for term in [*query_variants, *fallback_terms]:
             try:
                 rescued = _execute_catalog_query(term, limit)
                 rescued.suggestions = suggestions

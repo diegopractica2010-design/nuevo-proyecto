@@ -28,12 +28,12 @@
             </span>
           </a>
           <nav class="nav">
-            <a href="/" class="nav-link">Buscar</a>
+            <a href="/" class="nav-link" id="search-link">Buscar</a>
             <a href="#baskets" class="nav-link" id="baskets-link">Canastas</a>
           </nav>
           <div class="topbar__meta">
-            <span class="topbar__pill">Lider operativo</span>
-            <span class="topbar__pill topbar__pill--ghost">Jumbo experimental</span>
+            <button class="topbar__pill is-active" type="button" data-action="select-store" data-store="lider">Lider operativo</button>
+            <button class="topbar__pill topbar__pill--ghost" type="button" data-action="select-store" data-store="jumbo">Jumbo experimental</button>
           </div>
           <form id="auth-form" class="auth-box">
             <input id="auth-username" type="text" autocomplete="username" placeholder="usuario" />
@@ -202,6 +202,45 @@
           </section>
 
           <section id="feedback" class="feedback-stack"></section>
+          <section class="panel shopping-list-panel">
+            <div class="panel__header">
+              <div>
+                <p class="eyebrow eyebrow--small">Lista completa</p>
+                <h2>Arma tu compra antes de buscar</h2>
+              </div>
+              <button id="clear-shopping-list-button" class="text-button" type="button">Vaciar</button>
+            </div>
+
+            <form id="shopping-list-form" class="list-builder">
+              <label for="shopping-item-input" class="sr-only">Producto para agregar</label>
+              <input
+                id="shopping-item-input"
+                type="text"
+                autocomplete="off"
+                placeholder="Ej: arroz 1 kilo, leche entera 1 litro, yoghurt Los Choicos pote"
+              />
+              <button type="submit">Agregar</button>
+            </form>
+
+            <div class="paste-list">
+              <textarea
+                id="shopping-list-paste"
+                rows="3"
+                placeholder="Tambien puedes pegar una lista, un producto por linea"
+              ></textarea>
+              <button id="import-shopping-list-button" class="btn btn--ghost" type="button">Importar lineas</button>
+            </div>
+
+            <div id="shopping-list-items" class="shopping-list-items"></div>
+
+            <div class="shopping-list-actions">
+              <button id="compare-shopping-list-button" class="btn btn--primary" type="button">
+                Buscar lista completa
+              </button>
+              <span id="shopping-list-status" class="muted-text">Agrega productos para comparar Lider y Jumbo.</span>
+            </div>
+          </section>
+          <section id="shopping-list-results" class="shopping-results"></section>
           <section id="suggestions" class="suggestions-bar"></section>
           <section id="summary-cards" class="summary-grid"></section>
 

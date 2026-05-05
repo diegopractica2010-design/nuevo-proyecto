@@ -15,8 +15,9 @@ from backend.config import (
     JUMBO_SEARCH_URL,
     REQUEST_TIMEOUT,
 )
+from backend.compliance import assert_live_store_access_allowed
 from backend.parser import parse_catalog_page, parse_price_text
-from backend.scraper import NoResultsError
+from backend.scraper import NoResultsError, fallback_query_variants, rank_products_for_query
 
 
 JUMBO_CATALOG_API_URL = "https://sm-web-api.ecomm.cencosud.com/catalog/api/v2/products/search/"
@@ -69,6 +70,7 @@ def _execute_catalog_query(session: requests.Session, query: str, limit: int) ->
 
     for profile_name, headers in HTML_HEADER_PROFILES:
         try:
+            assert_live_store_access_allowed("jumbo", url, purpose="search")
             response = session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
@@ -112,6 +114,12 @@ def _execute_catalog_api_query(
     source_url = JUMBO_CATALOG_API_URL
 
     while len(products) < limit:
+        request = requests.Request(
+            "GET",
+            JUMBO_CATALOG_API_URL,
+            params={"ft": query, "page": page, "sc": 11},
+        ).prepare()
+        assert_live_store_access_allowed("jumbo", request.url or JUMBO_CATALOG_API_URL, purpose="search")
         response = session.get(
             JUMBO_CATALOG_API_URL,
             params={"ft": query, "page": page, "sc": 11},
@@ -149,10 +157,12 @@ def _execute_catalog_api_query(
             break
         page += 1
 
+    ranked_products = rank_products_for_query(products, query)
+
     return ScrapedSearchResult(
         query=query,
         applied_query=query,
-        products=products,
+        products=ranked_products,
         source_url=source_url,
         fetch_strategy="catalog_api",
         parse_strategy="vtex_catalog_api",
@@ -248,10 +258,41 @@ def search_jumbo(query: str, limit: int = 100) -> ScrapedSearchResult:
 
     with _create_session() as session:
         try:
-            return _execute_catalog_query(session, normalized_query, limit)
-        except NoResultsError:
-            # For Jumbo, we might not have suggestions like Lider, so just re-raise
-            raise
+            result = _execute_catalog_query(session, normalized_query, limit)
+            for variant in fallback_query_variants(normalized_query):
+                if variant == normalized_query or "tallarin" not in variant or "tallarines" in variant:
+                    continue
+                try:
+                    extra = _execute_catalog_query(session, variant, limit)
+                except NoResultsError:
+                    continue
+                result.products = _merge_products(result.products, extra.products, limit)
+                result.fetch_strategy = f"{result.fetch_strategy}+variant:{variant}"
+            return result
+        except NoResultsError as exc:
+            for variant in fallback_query_variants(normalized_query):
+                try:
+                    rescued = _execute_catalog_query(session, variant, limit)
+                except NoResultsError:
+                    continue
+                rescued.query = normalized_query
+                rescued.applied_query = variant
+                return rescued
+            raise exc
+
+
+def _merge_products(primary: list[dict], secondary: list[dict], limit: int) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for product in [*secondary, *primary]:
+        key = product.get("sku") or product.get("id") or product.get("url") or f"{product.get('name')}::{product.get('price')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(product)
+        if len(merged) >= limit:
+            break
+    return merged
 
 
 def normalize_query(query: str) -> str:
