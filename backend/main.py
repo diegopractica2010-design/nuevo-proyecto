@@ -226,7 +226,7 @@ def scraper_health():
 def search(
     query: Optional[str] = Query(None, min_length=1, description="Nombre del producto"),
     q: Optional[str] = Query(None, min_length=1, description="Alias compatible para query"),
-    limit: int = Query(36, ge=1, le=MAX_RESULTS, description="Cantidad máxima de resultados"),
+    limit: int = Query(100, ge=1, le=MAX_RESULTS, description="Cantidad máxima de resultados"),
     store: str = Query("lider", description="Tienda a buscar: lider, jumbo"),
 ):
     search_query = query or q
@@ -241,6 +241,23 @@ def search(
     except SearchServiceError as exc:
         logger.error(f"Search error for {store}: {exc.message}")
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@app.get("/catalog/index", include_in_schema=False)
+def catalog_index(
+    store: str = Query("lider", description="Tienda a indexar: lider, jumbo"),
+    max_products: int = Query(1000, ge=1, le=10000, description="Maximo de productos a devolver"),
+):
+    """Indexa un inventario amplio paginando resultados reales de la tienda."""
+    from backend.catalog_indexer import index_store_catalog
+
+    try:
+        return index_store_catalog(store, max_products=max_products).to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Catalog index error for %s: %s", store, exc)
+        raise HTTPException(status_code=502, detail="No se pudo indexar el catalogo") from exc
 
 
 # Endpoints de canastas

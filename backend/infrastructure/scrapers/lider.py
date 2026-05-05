@@ -35,7 +35,7 @@ class LiderScraper(BaseScraper):
     3. Parseo HTML directo como ultimo recurso.
     """
 
-    def search(self, query: str, limit: int = 36) -> list[ScrapedProduct]:
+    def search(self, query: str, limit: int = 100) -> list[ScrapedProduct]:
         html = self.get(LIDER_SEARCH_URL, params={"q": query})
         products = self.parse_products(html, limit=limit)
         if not products:
@@ -46,7 +46,7 @@ class LiderScraper(BaseScraper):
             )
         return products
 
-    def parse_products(self, html: str, limit: int = 36) -> list[ScrapedProduct]:
+    def parse_products(self, html: str, limit: int = 100) -> list[ScrapedProduct]:
         products = self._parse_next_data(html, limit)
         if products:
             logger.debug("Lider: estrategia __NEXT_DATA__ exitosa (%d productos)", len(products))
@@ -349,5 +349,5 @@ def _parse_price_string(text: str) -> float | None:
     return float(raw_value)
 
 
-def search_lider(query: str, limit: int = 36) -> list[ScrapedProduct]:
+def search_lider(query: str, limit: int = 100) -> list[ScrapedProduct]:
     return LiderScraper().search(query, limit=limit)

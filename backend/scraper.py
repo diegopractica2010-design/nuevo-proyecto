@@ -138,25 +138,40 @@ def fetch_autocomplete_terms(query: str) -> list[str]:
     return unique_terms
 
 
-def _candidate_pages(query: str) -> list[tuple[str, str, dict[str, str]]]:
+def _with_page(url: str, page: int) -> str:
+    if page <= 1:
+        return url
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}page={page}"
+
+
+def _product_key(product: dict) -> str:
+    return (
+        str(product.get("sku") or product.get("id") or product.get("url") or "")
+        or f"{product.get('name')}::{product.get('price')}"
+    )
+
+
+def _candidate_pages(query: str, page: int = 1) -> list[tuple[str, str, dict[str, str]]]:
     slug = _slugify_query(query)
-    search_url = SEARCH_URL.format(query=quote_plus(query))
+    search_url = _with_page(SEARCH_URL.format(query=quote_plus(query)), page)
     slug_url = SLUG_URL.format(slug=slug)
 
     candidates: list[tuple[str, str, dict[str, str]]] = []
     for profile_name, headers in HTML_HEADER_PROFILES:
-        candidates.append((f"search:{profile_name}", search_url, headers))
+        candidates.append((f"search:{profile_name}:page:{page}", search_url, headers))
 
-    candidates.append(("slug:browser", slug_url, HTML_HEADER_PROFILES[0][1]))
+    if page == 1:
+        candidates.append(("slug:browser", slug_url, HTML_HEADER_PROFILES[0][1]))
     return candidates
 
 
-def _execute_catalog_query(query: str, limit: int) -> ScrapedSearchResult:
+def _fetch_catalog_page(query: str, page: int, limit: int) -> ScrapedSearchResult:
     normalized_query = normalize_query(query)
     attempts: list[str] = []
     had_catalog_response = False
 
-    for strategy_name, url, headers in _candidate_pages(normalized_query):
+    for strategy_name, url, headers in _candidate_pages(normalized_query, page):
         try:
             html, resolved_url = _request_text(url, headers)
             if _is_blocked_page(html):
@@ -183,6 +198,58 @@ def _execute_catalog_query(query: str, limit: int) -> ScrapedSearchResult:
         raise NoResultsError(normalized_query, attempts=attempts)
 
     raise ScraperError(" | ".join(attempts) or "Lider no respondió con una página utilizable")
+
+
+def _execute_catalog_query(query: str, limit: int) -> ScrapedSearchResult:
+    normalized_query = normalize_query(query)
+    products: list[dict] = []
+    seen: set[str] = set()
+    source_url: str | None = None
+    fetch_strategies: list[str] = []
+    parse_strategy: str | None = None
+    page = 1
+
+    while len(products) < limit:
+        try:
+            page_result = _fetch_catalog_page(normalized_query, page, limit)
+        except NoResultsError:
+            if products:
+                break
+            raise
+        page_products = page_result.products
+        new_count = 0
+
+        for product in page_products:
+            key = _product_key(product)
+            if key in seen:
+                continue
+            seen.add(key)
+            product = dict(product)
+            product["position"] = len(products) + 1
+            products.append(product)
+            new_count += 1
+            if len(products) >= limit:
+                break
+
+        source_url = source_url or page_result.source_url
+        fetch_strategies.append(page_result.fetch_strategy)
+        parse_strategy = parse_strategy or page_result.parse_strategy
+
+        if not page_products or new_count == 0:
+            break
+        page += 1
+
+    if not products:
+        raise NoResultsError(normalized_query)
+
+    return ScrapedSearchResult(
+        query=normalized_query,
+        applied_query=normalized_query,
+        products=products[:limit],
+        source_url=source_url or SEARCH_URL.format(query=quote_plus(normalized_query)),
+        fetch_strategy=" + ".join(fetch_strategies),
+        parse_strategy=parse_strategy or "unknown",
+    )
 
 
 def search_lider(query: str, limit: int) -> ScrapedSearchResult:

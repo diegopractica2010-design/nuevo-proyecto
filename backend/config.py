@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     JUMBO_PRODUCT_BASE_URL: str = "https://www.jumbo.cl"
     
     REQUEST_TIMEOUT: int = int(os.getenv("REQUEST_TIMEOUT", "18"))
-    MAX_RESULTS: int = int(os.getenv("MAX_RESULTS", "48"))
+    MAX_RESULTS: int = int(os.getenv("MAX_RESULTS", "200"))
     AUTOCOMPLETE_LIMIT: int = int(os.getenv("AUTOCOMPLETE_LIMIT", "6"))
     SUGGESTION_FALLBACK_LIMIT: int = int(os.getenv("SUGGESTION_FALLBACK_LIMIT", "3"))
     

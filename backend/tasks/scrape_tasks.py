@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True, max_retries=3, name="backend.tasks.scrape_lider")
-def scrape_lider(self, query: str, limit: int = 36) -> dict:
+def scrape_lider(self, query: str, limit: int = 100) -> dict:
     try:
         scraped_products = LiderScraper().search(query, limit=limit)
         inserted_prices = 0

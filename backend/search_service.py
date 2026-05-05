@@ -149,44 +149,191 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
     if not adapter:
         raise SearchServiceError(f"Tienda no soportada: {store}", status_code=400)
 
+    # Intentar obtener del cache fresco primero
     cached = _get_cache(store, normalized_query, limit, allow_stale=False)
     if cached:
         return cached
 
-    stale = _get_cache(store, normalized_query, limit, allow_stale=True)
-    _enqueue_scrape(store, normalized_query, limit)
-    if stale and stale.results:
-        stale.warning = (
-            f"Actualizacion de {store.title()} encolada. "
-            "Se muestran resultados recientes desde cache."
+    # Si no hay cache fresco, intentar traer datos frescos
+    logger.info("Ejecutando búsqueda en vivo para query=%s, store=%s", normalized_query, store)
+    
+    try:
+        if store == "lider":
+            from backend.scraper import search_lider
+            results = search_lider(normalized_query, limit)
+        else:
+            from backend.scraper_jumbo import search_jumbo
+            results = search_jumbo(normalized_query, limit)
+        
+        # Si tenemos resultados, construir respuesta
+        if results and results.products:
+            response = _build_response_from_scrape(
+                query=normalized_query,
+                results=results.products,
+                store=store,
+            )
+            # Guardar en cache para futuras búsquedas
+            _set_cache(store, normalized_query, limit, response)
+            logger.info("Búsqueda exitosa: %d productos encontrados", len(response.results))
+            return response
+        else:
+            logger.warning("Búsqueda sin resultados para query=%s", normalized_query)
+            return _empty_response(normalized_query, warning=None)
+            
+    except Exception as exc:
+        logger.error("Error en búsqueda: %s", exc, exc_info=True)
+        
+        # Si hay error, intentar obtener del cache viejo
+        stale = _get_cache(store, normalized_query, limit, allow_stale=True)
+        if stale and stale.results:
+            stale.warning = (
+                f"Error en búsqueda fresca. Mostrando resultados anteriores del {stale.fetched_at}"
+            )
+            return stale
+        
+        # Si nada funcionó, devolver respuesta vacía
+        return _empty_response(
+            normalized_query,
+            warning=f"No se pudo completar la búsqueda: {str(exc)}"
         )
-        return stale
-
-    return _empty_response(
-        normalized_query,
-        warning=(
-            f"Busqueda encolada para {store.title()}. "
-            "Los precios se actualizaran en segundo plano."
-        ),
-    )
 
 
 def _enqueue_scrape(store: str, query: str, limit: int) -> None:
-    task = scrape_lider if store == "lider" else search_jumbo_async
-    _start_publish_thread(task, query, limit)
+    """
+    Intenta encolar scraping en Celery.
+    Si falla (Redis no disponible), ejecuta de forma síncrona en background.
+    """
+    if store == "lider":
+        task = scrape_lider
+    else:
+        task = search_jumbo_async
+    
+    # Intenta modo async primero
+    if _try_celery_async(task, query, limit):
+        return
+    
+    # Si Celery falla, ejecuta de forma síncrona en thread background
+    _start_sync_scrape_thread(store, query, limit)
 
 
-def _start_publish_thread(task, query: str, limit: int) -> None:
+def _try_celery_async(task, query: str, limit: int) -> bool:
+    """Intenta encolar en Celery. Devuelve True si tuvo éxito."""
+    try:
+        task.apply_async(args=(query,), kwargs={"limit": limit}, retry=False)
+        logger.info("Scrape encolado en Celery para query=%s", query)
+        return True
+    except Exception as exc:
+        logger.debug("Celery no disponible, ejecutando scraper síncrono: %s", exc)
+        return False
+
+
+def _start_sync_scrape_thread(store: str, query: str, limit: int) -> None:
+    """Ejecuta scraper de forma síncrona en un thread separado."""
     thread = Thread(
-        target=_publish_scrape_task,
-        args=(task, query, limit),
+        target=_execute_scrape_sync,
+        args=(store, query, limit),
         daemon=True,
     )
     thread.start()
 
 
-def _publish_scrape_task(task, query: str, limit: int) -> None:
+def _execute_scrape_sync(store: str, query: str, limit: int) -> None:
+    """Ejecuta scraper directamente sin Celery."""
     try:
-        task.apply_async(args=(query,), kwargs={"limit": limit}, retry=False)
+        logger.info("Ejecutando scraper síncrono para store=%s, query=%s", store, query)
+        
+        if store == "lider":
+            from backend.scraper import search_lider
+            results = search_lider(query, limit)
+        else:
+            from backend.scraper_jumbo import search_jumbo
+            results = search_jumbo(query, limit)
+        
+        # Procesar resultados y guardar en cache
+        if results and results.products:
+            response = _build_response_from_scrape(
+                query=query,
+                results=results.products,
+                store=store,
+            )
+            _set_cache(store, normalize_query(query), limit, response)
+            logger.info("Scrape completado: %d productos guardados en cache", len(results.products))
+        else:
+            logger.info("Scrape completado pero sin resultados")
+            
     except Exception as exc:
-        logger.warning("Failed to publish scrape task for query=%s: %s", query, exc)
+        logger.error("Error en scraper síncrono para store=%s: %s", store, exc, exc_info=True)
+
+
+def _build_response_from_scrape(query: str, results: list, store: str) -> SearchResponse:
+    """Construye SearchResponse a partir de productos scrapeados."""
+    
+    products = []
+    min_price = None
+    max_price = None
+    
+    for scraped_product in results:
+        # Si es ScrapedProduct (tiene .product), extraer el Product
+        if hasattr(scraped_product, 'product'):
+            product = scraped_product.product
+            price = scraped_product.price
+        else:
+            # Si es un diccionario
+            product = scraped_product
+            price = float(product.get('price', 0) or 0)
+        
+        # Convertir a diccionario si es objeto
+        if hasattr(product, 'model_dump'):
+            product_dict = product.model_dump()
+        elif isinstance(product, dict):
+            product_dict = product
+        else:
+            # Objeto con atributos
+            product_dict = {
+                'id': getattr(product, 'id', ''),
+                'name': getattr(product, 'name', ''),
+                'price': price,
+                'brand': getattr(product, 'brand', ''),
+                'category': getattr(product, 'category', ''),
+                'is_offer': bool(getattr(product, 'is_offer', False)),
+                'in_stock': bool(getattr(product, 'in_stock', True)),
+                'source': store,
+                'url': getattr(product, 'url', ''),
+            }
+        
+        # Actualizar precio a lo scrapeado
+        product_dict['price'] = price
+        product_dict['source'] = store
+        
+        price = float(product_dict.get('price', 0) or 0)
+        if min_price is None or price < min_price:
+            min_price = price
+        if max_price is None or price > max_price:
+            max_price = price
+        
+        products.append(product_dict)
+    
+    return SearchResponse(
+        query=query,
+        applied_query=query,
+        results=products,
+        count=len(products),
+        stats=SearchStats(
+            min_price=min_price,
+            max_price=max_price,
+            average_price=sum(p['price'] for p in products) / len(products) if products else None,
+            offer_count=sum(1 for p in products if p.get('is_offer')),
+            in_stock_count=sum(1 for p in products if p.get('in_stock')),
+        ),
+        facets=SearchFacets(
+            brands=[{"name": v, "count": 0} for v in set(p.get('brand') for p in products if p.get('brand'))],
+            categories=[{"name": v, "count": 0} for v in set(p.get('category') for p in products if p.get('category'))],
+            price_range=PriceRange(min=min_price, max=max_price),
+        ),
+        suggestions=[],
+        cached=False,
+        warning=None,
+        fetched_at=datetime.now(UTC).isoformat(),
+        source_url=f"https://super.{store}.cl/search?q={query}",
+        strategy="search:sync-fallback",
+    )

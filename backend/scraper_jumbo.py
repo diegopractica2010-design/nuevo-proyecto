@@ -60,6 +60,13 @@ def _execute_catalog_query(session: requests.Session, query: str, limit: int) ->
 
     attempts: list[str] = []
 
+    try:
+        result = _execute_catalog_api_query(session, query, limit)
+        if result.products:
+            return result
+    except Exception as exc:
+        attempts.append(f"catalog_api: {exc}")
+
     for profile_name, headers in HTML_HEADER_PROFILES:
         try:
             response = session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
@@ -83,13 +90,6 @@ def _execute_catalog_query(session: requests.Session, query: str, limit: int) ->
             attempts.append(f"search:{profile_name}: {exc}")
             continue
 
-    try:
-        result = _execute_catalog_api_query(session, query, limit)
-        if result.products:
-            return result
-    except Exception as exc:
-        attempts.append(f"catalog_api: {exc}")
-
     raise NoResultsError(query, attempts=attempts)
 
 
@@ -106,40 +106,54 @@ def _execute_catalog_api_query(
         "Referer": JUMBO_SEARCH_URL.format(query=quote_plus(query)),
         "User-Agent": "Mozilla/5.0",
     }
-    response = session.get(
-        JUMBO_CATALOG_API_URL,
-        params={"ft": query, "page": 1, "sc": 11},
-        headers=headers,
-        timeout=REQUEST_TIMEOUT,
-    )
-    response.raise_for_status()
-
-    payload = response.json()
-    raw_products = payload.get("products", []) if isinstance(payload, dict) else payload
-    if not isinstance(raw_products, list):
-        raw_products = []
-
     products: list[dict] = []
     seen: set[str] = set()
-    for raw in raw_products:
-        if len(products) >= limit:
+    page = 1
+    source_url = JUMBO_CATALOG_API_URL
+
+    while len(products) < limit:
+        response = session.get(
+            JUMBO_CATALOG_API_URL,
+            params={"ft": query, "page": page, "sc": 11},
+            headers=headers,
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        source_url = response.url
+
+        payload = response.json()
+        raw_products = payload.get("products", []) if isinstance(payload, dict) else payload
+        if not isinstance(raw_products, list):
+            raw_products = []
+
+        if not raw_products:
             break
-        if not isinstance(raw, dict):
-            continue
-        product = _normalize_api_product(raw, position=len(products) + 1)
-        if not product:
-            continue
-        key = product.get("sku") or product.get("url") or f"{product['name']}::{product['price']}"
-        if key in seen:
-            continue
-        seen.add(key)
-        products.append(product)
+
+        new_count = 0
+        for raw in raw_products:
+            if len(products) >= limit:
+                break
+            if not isinstance(raw, dict):
+                continue
+            product = _normalize_api_product(raw, position=len(products) + 1)
+            if not product:
+                continue
+            key = product.get("sku") or product.get("id") or product.get("url") or f"{product['name']}::{product['price']}"
+            if key in seen:
+                continue
+            seen.add(key)
+            products.append(product)
+            new_count += 1
+
+        if new_count == 0:
+            break
+        page += 1
 
     return ScrapedSearchResult(
         query=query,
         applied_query=query,
         products=products,
-        source_url=response.url,
+        source_url=source_url,
         fetch_strategy="catalog_api",
         parse_strategy="vtex_catalog_api",
     )
@@ -228,7 +242,7 @@ def _to_text(value: Any) -> str | None:
     return text or None
 
 
-def search_jumbo(query: str, limit: int = 24) -> ScrapedSearchResult:
+def search_jumbo(query: str, limit: int = 100) -> ScrapedSearchResult:
     """Search for products on Jumbo.cl."""
     normalized_query = normalize_query(query)
 

@@ -370,7 +370,7 @@ async function performSearch(query) {
   renderAll();
 
   try {
-    const response = await fetch(`/api/search?q=${encodeURIComponent(trimmedQuery)}&limit=36&store=${state.store}`, {
+    const response = await fetch(`/search?q=${encodeURIComponent(trimmedQuery)}&limit=100&store=${state.store}`, {
       signal: controller.signal,
     });
     const data = await response.json();
