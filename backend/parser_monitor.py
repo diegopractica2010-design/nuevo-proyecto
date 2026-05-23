@@ -13,17 +13,24 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 
-from backend.config import BROWSER_HEADERS, DATA_DIR, REQUEST_TIMEOUT
+from backend.config import BROWSER_HEADERS, DATA_DIR, REQUEST_TIMEOUT, STORE_SSL_VERIFY
+from backend.metrics import scraper_health_failures
 
 
 logger = logging.getLogger(__name__)
 
 SNAPSHOT_DIR = DATA_DIR / "parser_snapshots"
+PRODUCT_SNAPSHOT_DIR = DATA_DIR / "snapshots"
 STATE_FILE = SNAPSHOT_DIR / "parser_state.json"
 
 CONTROL_QUERIES = {
-    "lider": "leche",
-    "jumbo": "leche",
+    "lider": "arroz",
+    "jumbo": "arroz",
+}
+
+KNOWN_PARSE_STRATEGIES = {
+    "lider": {"next_data", "graphql", "html_fallback"},
+    "jumbo": {"catalog_api"},
 }
 
 
@@ -44,40 +51,46 @@ def run_full_check() -> dict[str, Any]:
     return result
 
 
-def check_store(store: str, query: str = "leche") -> dict[str, Any]:
+def check_store(store: str, query: str = "arroz") -> dict[str, Any]:
     started = datetime.now(UTC)
     issues: list[str] = []
     product_count = 0
-    html_changed = False
+    structure_changed = False
     structure_detail = ""
+    parse_strategy = "unknown"
 
     try:
-        html = _fetch_search_html(store, query)
-        _save_latest_snapshot(store, html)
-        html_changed, structure_detail = _check_structure_changed(store, html)
-
         if store == "lider":
-            from backend.infrastructure.scrapers.lider import LiderScraper
+            from backend.scraper import search_lider
 
-            products = LiderScraper().parse_products(html, limit=10)
-            product_count = len(products)
-            if "__NEXT_DATA__" not in html:
-                issues.append("__NEXT_DATA__ no encontrado en Lider")
+            result = search_lider(query=query, limit=10)
+            parse_strategy = _normalize_parse_strategy(store, result.parse_strategy)
         elif store == "jumbo":
             from backend.scraper_jumbo import search_jumbo
 
             result = search_jumbo(query=query, limit=10)
-            product_count = len(getattr(result, "products", []) or [])
+            parse_strategy = _normalize_parse_strategy(store, result.parse_strategy)
         else:
-            issues.append(f"Tienda desconocida: {store}")
+            raise ValueError(f"Tienda desconocida: {store}")
+
+        products = getattr(result, "products", []) or []
+        product_count = len(products)
 
         if product_count == 0:
             issues.append("El scraper no extrajo productos")
 
-        if html_changed and structure_detail and (
-            product_count == 0 or "__NEXT_DATA__ shape:" in structure_detail
-        ):
-            issues.append(f"Cambio estructural detectado: {structure_detail}")
+        first_product = products[0] if products else None
+        first_price = _product_price(first_product)
+        if first_price is None or not 500 <= first_price <= 10000:
+            issues.append(f"Precio canonico fuera de rango: {first_price}")
+
+        if parse_strategy not in KNOWN_PARSE_STRATEGIES[store]:
+            issues.append(f"Parse strategy desconocida: {parse_strategy}")
+
+        if isinstance(first_product, dict):
+            structure_changed, structure_detail = _snapshot_product_keys(store, first_product)
+            if structure_changed:
+                logger.warning("Drift estructural en %s: %s", store, structure_detail)
 
         status = "degraded" if issues else "ok"
         store_result = {
@@ -85,24 +98,31 @@ def check_store(store: str, query: str = "leche") -> dict[str, Any]:
             "timestamp": datetime.now(UTC).isoformat(),
             "duration_seconds": (datetime.now(UTC) - started).total_seconds(),
             "product_count": product_count,
+            "parse_strategy": parse_strategy,
+            "first_product": first_product,
+            "first_price": first_price,
             "issues": issues,
-            "structure_changed": html_changed,
+            "structure_changed": structure_changed,
             "structure_detail": structure_detail,
         }
 
         if status == "degraded":
+            scraper_health_failures.labels(store=store).inc()
+            logger.error("Scraper health degraded for %s: %s", store, issues)
             store_result["alert_sent"] = _send_alert(_build_alert_message(store, store_result))
 
         return store_result
     except Exception as exc:
         logger.error("Parser check failed for %s: %s", store, exc, exc_info=True)
+        scraper_health_failures.labels(store=store).inc()
         store_result = {
-            "status": "degraded",
+            "status": "down",
             "timestamp": datetime.now(UTC).isoformat(),
             "duration_seconds": (datetime.now(UTC) - started).total_seconds(),
             "product_count": product_count,
             "issues": [str(exc)],
-            "structure_changed": html_changed,
+            "parse_strategy": parse_strategy,
+            "structure_changed": structure_changed,
             "structure_detail": structure_detail,
             "alert_reason": "Excepcion durante el check",
         }
@@ -180,7 +200,13 @@ def _fetch_search_html(store: str, query: str) -> str:
     else:
         raise ValueError(f"Tienda desconocida: {store}")
 
-    response = requests.get(url, params=params, headers=BROWSER_HEADERS, timeout=REQUEST_TIMEOUT)
+    response = requests.get(
+        url,
+        params=params,
+        headers=BROWSER_HEADERS,
+        timeout=REQUEST_TIMEOUT,
+        verify=STORE_SSL_VERIFY,
+    )
     response.raise_for_status()
     return response.text
 
@@ -265,9 +291,71 @@ def _hash_text(text: str) -> str:
 
 def _aggregate_status(result: dict[str, Any]) -> str:
     stores = result.get("stores", {})
-    if any(isinstance(item, dict) and item.get("status") == "degraded" for item in stores.values()):
+    statuses = [item.get("status") for item in stores.values() if isinstance(item, dict)]
+    if any(status == "down" for status in statuses):
+        return "down"
+    if any(status == "degraded" for status in statuses):
         return "degraded"
     return "ok"
+
+
+def _normalize_parse_strategy(store: str, parse_strategy: str | None) -> str:
+    value = str(parse_strategy or "unknown")
+    if store == "lider":
+        if value in {"lider_graphql", "graphql"}:
+            return "graphql"
+        if value == "next_data":
+            return "next_data"
+        if value in {"ld_json", "inline_search", "html", "css_selectors"}:
+            return "html_fallback"
+    if store == "jumbo" and value in {"vtex_catalog_api", "catalog_api"}:
+        return "catalog_api"
+    return value
+
+
+def _product_price(product: Any) -> float | None:
+    if isinstance(product, dict):
+        raw_price = product.get("price")
+    else:
+        raw_price = getattr(product, "price", None)
+    try:
+        return float(raw_price)
+    except (TypeError, ValueError):
+        return None
+
+
+def _snapshot_product_keys(store: str, product: dict[str, Any]) -> tuple[bool, str]:
+    PRODUCT_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    keys = sorted(product.keys())
+    today = datetime.now(UTC).strftime("%Y%m%d")
+    path = PRODUCT_SNAPSHOT_DIR / f"{store}-{today}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "store": store,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "keys": keys,
+                "sample": product,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    state = _load_state()
+    previous = state.get(f"{store}.product_keys")
+    state[f"{store}.product_keys"] = keys
+    _save_state(state)
+
+    if not isinstance(previous, list):
+        return False, "baseline creado"
+
+    missing = sorted(set(previous) - set(keys))
+    added = sorted(set(keys) - set(previous))
+    if missing or added:
+        return True, f"added={added}; missing={missing}"
+    return False, "sin cambios"
 
 
 def _build_alert_message(store: str, result: dict[str, Any]) -> str:

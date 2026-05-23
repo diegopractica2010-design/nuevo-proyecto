@@ -387,15 +387,65 @@ def delete_basket(basket_id: str, authorization: Optional[str] = Header(None)):
 
 # Endpoint de historial de precios
 @app.get("/price-history/{product_id}")
-def get_price_history(product_id: str, store: str = Query("lider", description="Tienda")):
+def get_price_history(
+    product_id: str,
+    store: str = Query("lider", description="Tienda"),
+    days: int = Query(30, ge=1, le=365, description="Dias a consultar"),
+):
     logger.info(f"Getting price history for {product_id} in {store}")
+    if "|" in product_id or ":" in product_id:
+        return _get_canonical_price_history(product_id, store, days)
+
     history = PriceHistoryService.get_price_history(product_id, store)
-    trends = PriceHistoryService.get_price_trends(product_id, store)
+    trends = PriceHistoryService.get_price_trends(product_id, store, days=days)
     return {
         "product_id": product_id,
         "store": store,
         "history": [h.model_dump() for h in history],
         "trends": trends
+    }
+
+
+def _get_canonical_price_history(canonical_key: str, store: str, days: int) -> dict:
+    from datetime import timedelta
+    from sqlalchemy import select
+
+    from backend.db import SessionLocal
+    from backend.infrastructure.db.models import PriceRecord, ProductRecord, StoreRecord
+
+    store_name = "Lider" if store == "lider" else "Jumbo" if store == "jumbo" else store.title()
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    with SessionLocal() as session:
+        statement = (
+            select(PriceRecord)
+            .join(ProductRecord, ProductRecord.id == PriceRecord.product_id)
+            .join(StoreRecord, StoreRecord.id == PriceRecord.store_id)
+            .where(ProductRecord.canonical_key == canonical_key)
+            .where(StoreRecord.name == store_name)
+            .where(PriceRecord.observed_at >= cutoff)
+            .order_by(PriceRecord.observed_at)
+        )
+        records = list(session.scalars(statement).all())
+
+    values = [float(record.value) for record in records]
+    return {
+        "canonical_key": canonical_key,
+        "store": store,
+        "days": days,
+        "history": [
+            {
+                "price": float(record.value),
+                "observed_at": record.observed_at.isoformat(),
+            }
+            for record in records
+        ],
+        "trends": {
+            "current_price": values[-1] if values else None,
+            "min_price": min(values) if values else None,
+            "max_price": max(values) if values else None,
+            "trend": "stable",
+            "history_count": len(values),
+        },
     }
 
 

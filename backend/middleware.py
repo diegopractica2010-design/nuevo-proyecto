@@ -12,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from backend.rate_limiter import get_rate_limiter
+from backend.request_context import reset_request_id, set_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -96,14 +97,14 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         
         # Store in request state for later access
         request.state.request_id = request_id
+        token = set_request_id(request_id)
         
-        # Process request
-        response = await call_next(request)
-        
-        # Add request ID to response headers
-        response.headers["X-Request-ID"] = request_id
-        
-        return response
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
+        finally:
+            reset_request_id(token)
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):

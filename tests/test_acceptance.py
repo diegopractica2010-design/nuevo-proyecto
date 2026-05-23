@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -7,6 +8,8 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.models import Product, SearchResponse
+from backend.scraper import ScrapedSearchResult as LiderScrapedSearchResult
+from backend.scraper_jumbo import ScrapedSearchResult as JumboScrapedSearchResult
 
 
 client = TestClient(app)
@@ -79,6 +82,135 @@ def test_compare_list_with_one_store_down(monkeypatch):
     assert "error" in item["stores"][0]
     assert item["stores"][1]["best"]["price"] > 0
     assert item["cheapest"]["source"] == "jumbo"
+
+
+def test_scraper_health_canonical_queries_succeed(monkeypatch, tmp_path):
+    import backend.parser_monitor as parser_monitor
+
+    monkeypatch.setattr(parser_monitor, "SNAPSHOT_DIR", tmp_path / "parser_snapshots")
+    monkeypatch.setattr(parser_monitor, "PRODUCT_SNAPSHOT_DIR", tmp_path / "snapshots")
+    monkeypatch.setattr(parser_monitor, "STATE_FILE", tmp_path / "parser_snapshots" / "parser_state.json")
+
+    lider = LiderScrapedSearchResult(
+        query="arroz",
+        applied_query="arroz",
+        products=[{"name": "Arroz Lider 1 kg", "price": 1500, "source": "lider"}],
+        source_url="https://super.lider.cl/search?q=arroz",
+        fetch_strategy="search:browser",
+        parse_strategy="next_data",
+    )
+    jumbo = JumboScrapedSearchResult(
+        query="arroz",
+        applied_query="arroz",
+        products=[{"name": "Arroz Jumbo 1 kg", "price": 1600, "source": "jumbo"}],
+        source_url="https://www.jumbo.cl/busqueda?ft=arroz",
+        fetch_strategy="catalog_api",
+        parse_strategy="vtex_catalog_api",
+    )
+
+    monkeypatch.setattr("backend.scraper.search_lider", lambda query, limit: lider)
+    monkeypatch.setattr("backend.scraper_jumbo.search_jumbo", lambda query, limit: jumbo)
+
+    result = parser_monitor.run_full_check()
+
+    assert result["stores"]["lider"]["status"] == "ok"
+    assert result["stores"]["lider"]["parse_strategy"] == "next_data"
+    assert result["stores"]["jumbo"]["status"] == "ok"
+    assert result["stores"]["jumbo"]["parse_strategy"] == "catalog_api"
+
+
+def test_db_cache_serves_recent_searches(monkeypatch):
+    db_response = _search_response("arroz", "lider", 1290)
+    db_response.strategy = "db"
+
+    scraper_called = False
+
+    def fake_adapter(_store):
+        class Adapter:
+            def search(self, query, limit):
+                nonlocal scraper_called
+                scraper_called = True
+                return None
+
+        return Adapter()
+
+    monkeypatch.setattr(
+        "backend.search_service._get_db_search_response",
+        lambda query, store, limit: (db_response, timedelta(minutes=5)),
+    )
+    monkeypatch.setattr("backend.search_service.get_store_adapter", fake_adapter)
+
+    from backend.search_service import search_products
+
+    response = search_products("arroz", store="lider", limit=10)
+
+    assert response.strategy == "db-fresh"
+    assert response.results[0].price == 1290
+    assert scraper_called is False
+
+
+def test_canonicalize_unifies_brand_variants():
+    from backend.domain.normalization.matching import are_equivalent, canonicalize
+
+    first = canonicalize("Arroz Tucapel S.A. Grado 1 1 kg")
+    second = canonicalize("arroz grado uno tucapel 1000 g")
+
+    assert first.canonical_key == "arroz:tucapel:grado1:1000g"
+    assert are_equivalent(first, second)
+
+
+def test_unit_price_calculation(monkeypatch):
+    from backend.scraper import ScrapedSearchResult
+    from backend.search_service import clear_search_cache, search_products
+    from backend.store_adapters import StoreAdapter
+
+    clear_search_cache()
+    adapter = StoreAdapter(
+        name="lider",
+        display_name="Lider",
+        search=lambda query, limit: ScrapedSearchResult(
+            query=query,
+            applied_query=query,
+            products=[{"name": "Arroz Tucapel 1 kg", "price": 2000, "source": "lider"}],
+            source_url="https://super.lider.cl/search?q=arroz",
+            fetch_strategy="search",
+            parse_strategy="next_data",
+        ),
+    )
+    monkeypatch.setattr("backend.search_service._get_db_search_response", lambda query, store, limit: (None, None))
+    monkeypatch.setattr("backend.search_service.get_store_adapter", lambda store: adapter)
+
+    response = search_products("arroz", store="lider", limit=10)
+
+    assert response.results[0].unit_price == "$2.000/kg"
+
+
+def test_compare_marks_same_product_across_stores(monkeypatch):
+    def fake_search(query, limit, store):
+        names = {
+            "lider": "Arroz Tucapel S.A. Grado 1 1 kg",
+            "jumbo": "Arroz grado uno Tucapel 1000 g",
+        }
+        return SearchResponse(
+            query=query,
+            applied_query=query,
+            count=1,
+            results=[
+                Product(
+                    name=names[store],
+                    price=1200 if store == "lider" else 1250,
+                    source=store,
+                    in_stock=True,
+                )
+            ],
+        )
+
+    monkeypatch.setattr("backend.shopping_list_service.search_products", fake_search)
+
+    response = client.post("/shopping-list/compare", json={"items": ["arroz tucapel grado 1 1 kilo"]})
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["same_product"] is True
 
 
 @pytest.mark.skipif(os.getenv("RUN_LIVE_ACCEPTANCE") != "1", reason="Live store acceptance is opt-in")

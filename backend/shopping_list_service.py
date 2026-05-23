@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 from unicodedata import normalize as unicode_normalize
 
+from backend.domain.normalization.matching import canonicalize
 from backend.search_service import search_products
 
 
@@ -314,6 +315,21 @@ def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int
             if result.get("best") and result["best"].get("price") is not None
         ]
         cheapest = min(candidates, key=lambda product: float(product.get("price") or 0), default=None)
+        canonical_keys = [
+            canonicalize(
+                " ".join(
+                    value
+                    for value in [
+                        str(result["best"].get("name") or ""),
+                        str(result["best"].get("brand") or ""),
+                    ]
+                    if value
+                )
+            ).canonical_key
+            for result in store_results
+            if result.get("best")
+        ]
+        same_product = len(canonical_keys) >= 2 and len(set(canonical_keys)) == 1
 
         compared_items.append(
             {
@@ -321,6 +337,7 @@ def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int
                 "quantity": item.quantity,
                 "stores": store_results,
                 "cheapest": cheapest,
+                "same_product": same_product,
                 "status": "matched" if cheapest else "not_found",
             }
         )

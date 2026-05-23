@@ -217,6 +217,12 @@ price_updates = Counter(
     ["store"],
 )
 
+scraper_health_failures = Counter(
+    "scraper_health_failures_total",
+    "Total scraper health check failures",
+    ["store"],
+)
+
 
 # ============================================================================
 # Error Metrics

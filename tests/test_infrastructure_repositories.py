@@ -34,7 +34,7 @@ class InfrastructureRepositoryTests(unittest.TestCase):
             matches = repo.search_similar("arroz 1000 g tucapel")
 
             self.assertEqual(len(matches), 1)
-            self.assertEqual(matches[0].canonical_key, "tucapel|arroz|1000g")
+            self.assertEqual(matches[0].canonical_key, "arroz:tucapel:1000g")
 
     def test_price_insert_links_product_and_store(self):
         with SessionLocal() as session:

@@ -51,9 +51,9 @@ celery_app.conf.beat_schedule = {
         "task": "backend.tasks.cleanup_cache",
         "schedule": crontab(minute=0),
     },
-    "monitor-scraper-cada-6h": {
+    "monitor-scraper-cada-15min": {
         "task": "backend.tasks.monitor_scraper_health",
-        "schedule": crontab(hour="*/6", minute=15),
+        "schedule": crontab(minute="*/15"),
     },
 }
 

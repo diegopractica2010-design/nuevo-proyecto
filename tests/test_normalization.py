@@ -18,7 +18,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(product.brand, "tucapel")
         self.assertEqual(product.quantity_value, 1000.0)
         self.assertEqual(product.quantity_unit, "g")
-        self.assertEqual(product.canonical_key, "tucapel|arroz|1000g")
+        self.assertEqual(product.canonical_key, "arroz:tucapel:1000g")
 
     def test_equivalent_products_with_reordered_brand_and_unit(self):
         self.assertTrue(are_equivalent("Arroz Tucapel 1kg", "arroz 1000 g tucapel"))

@@ -79,15 +79,12 @@ def monitor_scraper_health(self) -> dict:
         from backend.parser_monitor import run_full_check
 
         result = run_full_check()
-        status = (
-            "degraded"
-            if any(
-                store.get("status") == "degraded"
-                for store in result.get("stores", {}).values()
-                if isinstance(store, dict)
-            )
-            else "ok"
-        )
+        statuses = [
+            store.get("status")
+            for store in result.get("stores", {}).values()
+            if isinstance(store, dict)
+        ]
+        status = "down" if "down" in statuses else "degraded" if "degraded" in statuses else "ok"
         result["task_status"] = status
         logger.info("Monitor scraper completado: %s", status)
         return result

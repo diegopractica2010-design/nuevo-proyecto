@@ -4,11 +4,19 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
+from threading import Thread
 from threading import Lock
 from typing import Any
 
+from sqlalchemy import select
+
 from backend.config import CACHE_TTL_SECONDS, MAX_RESULTS, STALE_CACHE_TTL_SECONDS
 from backend.compliance import ComplianceError
+from backend.db import SessionLocal
+from backend.domain.normalization.matching import canonicalize
+from backend.domain.price import Price
+from backend.infrastructure.db.models import PriceRecord, ProductRecord, StoreRecord
+from backend.infrastructure.db.repositories import PriceRepo, ProductRepo
 from backend.infrastructure.cache.cache import cache_get, cache_set
 from backend.models import (
     FacetValue,
@@ -18,11 +26,14 @@ from backend.models import (
     SearchResponse,
     SearchStats,
 )
+from backend.request_context import get_request_id
 from backend.scraper import normalize_query
 from backend.store_adapters import get_store_adapter
 
 
 logger = logging.getLogger(__name__)
+DB_FRESH_TTL = timedelta(hours=1)
+DB_STALE_TTL = timedelta(hours=24)
 
 
 class SearchServiceError(RuntimeError):
@@ -180,6 +191,16 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
     if not adapter:
         raise SearchServiceError(f"Tienda no soportada: {store}", status_code=400)
 
+    db_response, db_age = _get_db_search_response(normalized_query, store, limit)
+    if db_response and db_age is not None and db_age <= DB_FRESH_TTL:
+        db_response.strategy = "db-fresh"
+        return db_response
+
+    if db_response and db_age is not None and db_age <= DB_STALE_TTL:
+        db_response.strategy = "db-stale"
+        _start_background_refresh(normalized_query, limit, store)
+        return db_response
+
     cached = _get_cache(store, normalized_query, limit, allow_stale=False)
     if cached:
         return cached
@@ -199,6 +220,7 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
                 suggestions=getattr(results, "suggestions", []),
             )
             _set_cache(store, normalized_query, limit, response)
+            _persist_search_response_async(response)
             logger.info("Busqueda exitosa: %d productos encontrados", len(response.results))
             return response
 
@@ -209,7 +231,15 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
         logger.warning("Busqueda bloqueada por cumplimiento: %s", exc)
         return _empty_response(normalized_query, warning=str(exc), store=store)
     except Exception as exc:
-        logger.error("Error en busqueda: %s", exc, exc_info=True)
+        logger.error(
+            "[%s] Error en busqueda store=%s query=%s: %s",
+            get_request_id(),
+            store,
+            normalized_query,
+            exc,
+            exc_info=True,
+            extra={"request_id": get_request_id()},
+        )
         stale = _get_cache(store, normalized_query, limit, allow_stale=True)
         if stale and stale.results:
             stale.warning = f"Error en busqueda fresca. Mostrando resultados anteriores del {stale.fetched_at}"
@@ -218,6 +248,195 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
             normalized_query,
             warning=f"No se pudo completar la busqueda: {str(exc)}",
             store=store,
+        )
+
+
+def _start_background_refresh(query: str, limit: int, store: str) -> None:
+    thread = Thread(target=_refresh_search_background, args=(query, limit, store), daemon=True)
+    thread.start()
+
+
+def _refresh_search_background(query: str, limit: int, store: str) -> None:
+    try:
+        adapter = get_store_adapter(store)
+        if not adapter:
+            return
+        results = adapter.search(query, limit)
+        if results and results.products:
+            response = _build_response_from_scrape(
+                query=query,
+                results=results.products,
+                store=store,
+                applied_query=results.applied_query,
+                warning=getattr(results, "warning", None),
+                source_url=results.source_url,
+                strategy=f"{results.fetch_strategy}:{results.parse_strategy}",
+                suggestions=getattr(results, "suggestions", []),
+            )
+            _set_cache(store, query, limit, response)
+            _persist_search_response(response)
+    except Exception as exc:
+        logger.warning("Background refresh failed store=%s query=%s: %s", store, query, exc)
+
+
+def _persist_search_response_async(response: SearchResponse) -> None:
+    thread = Thread(target=_persist_search_response, args=(response,), daemon=True)
+    thread.start()
+
+
+def _store_display_name(store: str) -> str:
+    return "Lider" if store == "lider" else "Jumbo" if store == "jumbo" else store.title()
+
+
+def _get_or_create_store(session, store: str) -> StoreRecord:
+    name = _store_display_name(store)
+    record = session.scalar(select(StoreRecord).where(StoreRecord.name == name))
+    if record:
+        return record
+    record = StoreRecord(name=name)
+    session.add(record)
+    session.flush()
+    return record
+
+
+def _persist_search_response(response: SearchResponse) -> None:
+    observed_at = datetime.now(UTC)
+    try:
+        with SessionLocal() as session:
+            store = _get_or_create_store(session, response.source)
+            product_repo = ProductRepo(session)
+            price_repo = PriceRepo(session)
+            for product in response.results:
+                try:
+                    domain_product = canonicalize(" ".join(
+                        value for value in [product.name, product.brand or ""] if value
+                    ))
+                    record = product_repo.upsert(domain_product)
+                    session.flush()
+                    price_repo.insert(
+                        Price(
+                            product_key=record.canonical_key,
+                            store_id=str(store.id),
+                            value=float(product.price),
+                            observed_at=observed_at,
+                        )
+                    )
+                except Exception as exc:
+                    logger.debug("Skipping DB persistence for product=%s: %s", product.name, exc)
+            session.commit()
+    except Exception as exc:
+        logger.warning("Search persistence failed source=%s query=%s: %s", response.source, response.query, exc)
+
+
+def _get_db_search_response(query: str, store: str, limit: int) -> tuple[SearchResponse | None, timedelta | None]:
+    try:
+        with SessionLocal() as session:
+            store_record = session.scalar(select(StoreRecord).where(StoreRecord.name == _store_display_name(store)))
+            if not store_record:
+                return None, None
+
+            query_product = canonicalize(query)
+            terms = [term for term in query_product.canonical_name.split() if term]
+            statement = (
+                select(ProductRecord, PriceRecord)
+                .join(PriceRecord, PriceRecord.product_id == ProductRecord.id)
+                .where(PriceRecord.store_id == store_record.id)
+                .order_by(PriceRecord.observed_at.desc())
+                .limit(max(limit * 4, limit))
+            )
+            if query_product.canonical_key:
+                filters = [ProductRecord.canonical_key == query_product.canonical_key]
+            else:
+                filters = []
+            filters.extend(ProductRecord.canonical_name.ilike(f"%{term}%") for term in terms)
+            if query_product.brand:
+                filters.append(ProductRecord.brand == query_product.brand)
+            if filters:
+                from sqlalchemy import or_
+
+                statement = statement.where(or_(*filters))
+
+            rows = session.execute(statement).all()
+            latest_by_product: dict[str, tuple[ProductRecord, PriceRecord]] = {}
+            for product_record, price_record in rows:
+                key = product_record.canonical_key
+                current = latest_by_product.get(key)
+                if current is None or _as_utc(price_record.observed_at) > _as_utc(current[1].observed_at):
+                    latest_by_product[key] = (product_record, price_record)
+
+            if not latest_by_product:
+                return None, None
+
+            products: list[Product] = []
+            newest = None
+            for product_record, price_record in list(latest_by_product.values())[:limit]:
+                observed = _as_utc(price_record.observed_at)
+                newest = observed if newest is None or observed > newest else newest
+                products.append(
+                    Product(
+                        id=str(product_record.id),
+                        sku=product_record.canonical_key,
+                        name=product_record.canonical_name,
+                        brand=product_record.brand,
+                        price=float(price_record.value),
+                        in_stock=True,
+                        source=store,
+                        unit_price=_format_unit_price(float(price_record.value), product_record.quantity_value, product_record.quantity_unit),
+                    )
+                )
+
+            response = SearchResponse(
+                query=query,
+                applied_query=query,
+                count=len(products),
+                results=products,
+                stats=_build_stats(products),
+                facets=_build_facets(products),
+                fetched_at=(newest or datetime.now(UTC)).isoformat(),
+                source=store,
+                cached=False,
+                strategy="db",
+            )
+            age = datetime.now(UTC) - (newest or datetime.now(UTC))
+            return response, age
+    except Exception as exc:
+        logger.debug("DB search lookup failed store=%s query=%s: %s", store, query, exc)
+        return None, None
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _format_unit_price(price: float, quantity_value: float | None, quantity_unit: str | None) -> str | None:
+    if not quantity_value or not quantity_unit:
+        return None
+    unit = quantity_unit.lower()
+    if unit == "g":
+        return f"${round(price / quantity_value * 1000):,.0f}/kg".replace(",", ".")
+    if unit == "ml":
+        return f"${round(price / quantity_value * 1000):,.0f}/l".replace(",", ".")
+    return None
+
+
+def _apply_canonical_fields(product: dict[str, Any]) -> None:
+    name = str(product.get("name") or "")
+    brand = str(product.get("brand") or "")
+    if not name:
+        return
+    canonical = canonicalize(" ".join(value for value in [name, brand] if value))
+    product.setdefault("sku", canonical.canonical_key)
+    if not product.get("unit_price"):
+        try:
+            price = float(product.get("price") or 0)
+        except (TypeError, ValueError):
+            price = 0
+        product["unit_price"] = _format_unit_price(
+            price,
+            canonical.quantity_value,
+            canonical.quantity_unit,
         )
 
 
@@ -246,6 +465,7 @@ def _product_to_dict(product: Any, store: str) -> dict[str, Any]:
 
     product_dict["price"] = price
     product_dict["source"] = store
+    _apply_canonical_fields(product_dict)
     return product_dict
 
 
@@ -267,6 +487,9 @@ def _build_response_from_scrape(
         refined_products = select_best_products(product_dicts, query)
         if refined_products:
             product_dicts = refined_products
+
+    for product in product_dicts:
+        _apply_canonical_fields(product)
 
     products = [Product.model_validate(product) for product in product_dicts]
     return SearchResponse(

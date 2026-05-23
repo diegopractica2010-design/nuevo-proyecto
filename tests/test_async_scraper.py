@@ -29,7 +29,7 @@ class AsyncScraperTests(unittest.TestCase):
         self.assertEqual(len(products), 1)
         self.assertEqual(products[0].name, "Arroz Tucapel 1kg")
         self.assertEqual(products[0].price, 1290.0)
-        self.assertEqual(products[0].product.canonical_key, "tucapel|arroz|1000g")
+        self.assertEqual(products[0].product.canonical_key, "arroz:tucapel:1000g")
 
     @patch("backend.tasks.scrape_tasks.LiderScraper.search")
     def test_scrape_lider_task_inserts_products_and_prices(self, mock_search):
@@ -52,7 +52,7 @@ class AsyncScraperTests(unittest.TestCase):
             self.assertEqual(session.query(ProductRecord).count(), 1)
             self.assertEqual(session.query(PriceRecord).count(), 1)
             product = session.query(ProductRecord).one()
-            self.assertEqual(product.canonical_key, "tucapel|arroz|1000g")
+            self.assertEqual(product.canonical_key, "arroz:tucapel:1000g")
 
 
 if __name__ == "__main__":

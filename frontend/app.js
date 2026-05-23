@@ -701,6 +701,7 @@ function renderShoppingCompareRow(item) {
               ? `
                 <strong>${formatPrice(product.price)}</strong>
                 <span>${escapeHtml(product.name)}</span>
+                ${product.unit_price ? `<small>${escapeHtml(product.unit_price)}</small>` : ""}
               `
               : storeResult.error
                 ? `<span>${escapeHtml(storeLabel)} sin datos</span>`
@@ -716,9 +717,9 @@ function renderShoppingCompareRow(item) {
       <div class="shopping-result-row__head">
         <div>
           <strong>${escapeHtml(item.query)}</strong>
-          <span>${cheapest ? `Mejor: ${escapeHtml(getStoreConfig(cheapest.source).label)}` : "Sin coincidencias confiables"}</span>
+          <span>${cheapest ? `Mejor: ${escapeHtml(getStoreConfig(cheapest.source).label)}${item.same_product === false ? " · no estamos seguros si es el mismo producto" : ""}` : "Sin coincidencias confiables"}</span>
         </div>
-        ${cheapest ? `<strong>${formatPrice(cheapest.price)}</strong>` : ""}
+        ${cheapest ? `<strong>${formatPrice(cheapest.price)}${cheapest.unit_price ? ` · ${escapeHtml(cheapest.unit_price)}` : ""}</strong>` : ""}
       </div>
       <div class="store-options">${storeCards}</div>
     </article>
