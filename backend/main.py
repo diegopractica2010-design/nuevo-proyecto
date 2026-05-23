@@ -140,6 +140,11 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+app.mount(
+    "/_next",
+    StaticFiles(directory=FRONTEND_DIR / "out" / "_next", check_dir=False),
+    name="next-static",
+)
 
 logger.info("=" * 80)
 logger.info("Radar de Precios - Fase A (Estabilización)")
@@ -175,7 +180,9 @@ def _ensure_basket_access(basket: Basket, username: Optional[str]) -> None:
 @app.get("/", include_in_schema=False)
 def index():
     logger.info("Serving index page")
-    return FileResponse(FRONTEND_DIR / "index.html")
+    next_index = FRONTEND_DIR / "out" / "index.html"
+    legacy_index = FRONTEND_DIR / "index.html"
+    return FileResponse(next_index if next_index.exists() else legacy_index)
 
 
 @app.get("/health", include_in_schema=False)
