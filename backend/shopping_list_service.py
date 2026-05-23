@@ -194,6 +194,37 @@ def _product_to_dict(product: Any) -> dict[str, Any]:
     return dict(product)
 
 
+def _format_unit_price(price: float, quantity_value: float | None, quantity_unit: str | None) -> str | None:
+    if not quantity_value or not quantity_unit:
+        return None
+    if quantity_unit == "g":
+        return f"${round(price / quantity_value * 1000):,.0f}/kg".replace(",", ".")
+    if quantity_unit == "ml":
+        return f"${round(price / quantity_value * 1000):,.0f}/l".replace(",", ".")
+    return None
+
+
+def _ensure_unit_price(product: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not product or product.get("unit_price"):
+        return product
+    try:
+        canonical = canonicalize(
+            " ".join(
+                value
+                for value in [str(product.get("name") or ""), str(product.get("brand") or "")]
+                if value
+            )
+        )
+        product["unit_price"] = _format_unit_price(
+            float(product.get("price") or 0),
+            canonical.quantity_value,
+            canonical.quantity_unit,
+        )
+    except Exception:
+        product["unit_price"] = None
+    return product
+
+
 def select_best_products(products: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
     scored = [
         {**product, "_match_score": score_product_for_query(product, query)}
@@ -261,7 +292,7 @@ def is_specific_query(query: str) -> bool:
     return bool(_unit_requirement(query)) or len(tokens) >= 2
 
 
-def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int = 80) -> dict[str, Any]:
+def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int = 24) -> dict[str, Any]:
     indexed_items = list(enumerate(items))
     results_by_item: dict[int, list[dict[str, Any]]] = {index: [] for index, _ in indexed_items}
 
@@ -270,6 +301,7 @@ def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int
             response = search_products(item.query, limit=limit_per_store, store=store)
             products = [_product_to_dict(product) for product in response.results]
             best_options = select_best_products(products, item.query)
+            best_options = [_ensure_unit_price(product) for product in best_options]
             best_product = best_options[0] if best_options else None
             return index, {
                 "store": store,

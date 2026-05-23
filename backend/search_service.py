@@ -52,6 +52,7 @@ class CacheEntry:
 
 _CACHE: dict[str, CacheEntry] = {}
 _CACHE_LOCK = Lock()
+_PERSIST_LOCK = Lock()
 
 
 def clear_search_cache():
@@ -302,28 +303,37 @@ def _get_or_create_store(session, store: str) -> StoreRecord:
 def _persist_search_response(response: SearchResponse) -> None:
     observed_at = datetime.now(UTC)
     try:
-        with SessionLocal() as session:
-            store = _get_or_create_store(session, response.source)
-            product_repo = ProductRepo(session)
-            price_repo = PriceRepo(session)
-            for product in response.results:
-                try:
-                    domain_product = canonicalize(" ".join(
-                        value for value in [product.name, product.brand or ""] if value
-                    ))
-                    record = product_repo.upsert(domain_product)
-                    session.flush()
-                    price_repo.insert(
-                        Price(
-                            product_key=record.canonical_key,
-                            store_id=str(store.id),
-                            value=float(product.price),
-                            observed_at=observed_at,
+        with _PERSIST_LOCK:
+            with SessionLocal() as session:
+                store = _get_or_create_store(session, response.source)
+                product_repo = ProductRepo(session)
+                price_repo = PriceRepo(session)
+                seen_price_keys: set[str] = set()
+                for product in response.results:
+                    try:
+                        domain_product = canonicalize(" ".join(
+                            value for value in [product.name, product.brand or ""] if value
+                        ))
+                        record = product_repo.upsert(domain_product)
+                        session.flush()
+                        if record.canonical_key in seen_price_keys:
+                            continue
+                        seen_price_keys.add(record.canonical_key)
+                        price_repo.insert(
+                            Price(
+                                product_key=record.canonical_key,
+                                store_id=str(store.id),
+                                value=float(product.price),
+                                observed_at=observed_at,
+                            )
                         )
-                    )
-                except Exception as exc:
-                    logger.debug("Skipping DB persistence for product=%s: %s", product.name, exc)
-            session.commit()
+                    except Exception as exc:
+                        logger.debug("Skipping DB persistence for product=%s: %s", product.name, exc)
+                        session.rollback()
+                        store = _get_or_create_store(session, response.source)
+                        product_repo = ProductRepo(session)
+                        price_repo = PriceRepo(session)
+                session.commit()
     except Exception as exc:
         logger.warning("Search persistence failed source=%s query=%s: %s", response.source, response.query, exc)
 

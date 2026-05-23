@@ -11,7 +11,8 @@ class SearchServiceTests(unittest.TestCase):
         clear_search_cache()
 
     @patch("backend.search_service.get_store_adapter")
-    def test_search_products_scrapes_inline_on_first_call(self, mock_get_store_adapter):
+    @patch("backend.search_service._get_db_search_response", return_value=(None, None))
+    def test_search_products_scrapes_inline_on_first_call(self, _mock_db_search, mock_get_store_adapter):
         adapter = StoreAdapter(
             name="lider",
             display_name="Lider",
