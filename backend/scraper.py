@@ -17,10 +17,11 @@ from backend.config import (
     REQUEST_TIMEOUT,
     SEARCH_URL,
     SLUG_URL,
+    STORE_SSL_VERIFY,
     SUGGESTION_FALLBACK_LIMIT,
 )
 from backend.compliance import assert_live_store_access_allowed
-from backend.parser import parse_catalog_page
+from backend.parser import _parse_search_result, parse_catalog_page
 
 
 QUERY_STOPWORDS = {
@@ -41,6 +42,7 @@ QUERY_STOPWORDS = {
 }
 
 CHARCOAL_TERMS = {"briqueta", "briquetas", "vegetal", "quincho", "quebracho", "espino"}
+LIDER_GRAPHQL_URL = "https://super.lider.cl/orchestra/graphql"
 
 
 class ScraperError(RuntimeError):
@@ -94,7 +96,7 @@ def _build_session(headers: dict[str, str]) -> requests.Session:
 
 
 def normalize_query(query: str) -> str:
-    normalized = " ".join((query or "").split()).strip()
+    normalized = unicode_normalize("NFC", " ".join((query or "").split()).strip())
     if not normalized:
         raise ScraperError("La consulta está vacía")
     return normalized
@@ -173,9 +175,107 @@ def _is_blocked_page(html: str) -> bool:
 
 
 def _request_text(url: str, headers: dict[str, str]) -> tuple[str, str]:
-    response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+    response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT, verify=STORE_SSL_VERIFY)
     response.raise_for_status()
     return response.text, response.url
+
+
+def _find_search_result(value: Any) -> dict | None:
+    if isinstance(value, dict):
+        candidate = value.get("searchResult")
+        if isinstance(candidate, dict):
+            return candidate
+        if isinstance(value.get("itemStacks"), list):
+            return value
+        for nested in value.values():
+            found = _find_search_result(nested)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _find_search_result(item)
+            if found:
+                return found
+    return None
+
+
+def _graphql_payloads(query: str, page: int) -> list[dict[str, Any]]:
+    variables = {"query": query, "page": page, "prg": "desktop", "sort": "best_match"}
+    fragment = """
+        itemStacks {
+          items {
+            id
+            usItemId
+            name
+            brand
+            canonicalUrl
+            image
+            imageInfo { thumbnailUrl allImages { url } }
+            sellerName
+            category { path name }
+            priceInfo { linePrice itemPrice wasPrice unitPrice savings savingsAmt }
+            availabilityStatusV2 { value display }
+            badges { text key type }
+          }
+        }
+    """
+    return [
+        {
+            "operationName": "getSearch",
+            "variables": variables,
+            "query": (
+                "query getSearch($query: String, $page: Int, $prg: String, $sort: String) "
+                f"{{ search(searchQuery: $query, page: $page, prg: $prg, sort: $sort) {{ {fragment} }} }}"
+            ),
+        },
+        {
+            "operationName": "getSearchPage",
+            "variables": variables,
+            "query": (
+                "query getSearchPage($query: String, $page: Int, $prg: String, $sort: String) "
+                f"{{ searchResult(query: $query, page: $page, prg: $prg, sort: $sort) {{ {fragment} }} }}"
+            ),
+        },
+    ]
+
+
+def _fetch_graphql_page(query: str, page: int, limit: int) -> ScrapedSearchResult:
+    normalized_query = normalize_query(query)
+    attempts: list[str] = []
+    session = _build_session(API_HEADERS)
+    try:
+        for payload in _graphql_payloads(normalized_query, page):
+            operation = str(payload.get("operationName") or "graphql")
+            try:
+                assert_live_store_access_allowed("lider", LIDER_GRAPHQL_URL, purpose="search")
+                response = session.post(
+                    LIDER_GRAPHQL_URL,
+                    json=payload,
+                    timeout=REQUEST_TIMEOUT,
+                    verify=STORE_SSL_VERIFY,
+                )
+                response.raise_for_status()
+                search_result = _find_search_result(response.json())
+                if not search_result:
+                    attempts.append(f"{operation}: sin searchResult")
+                    continue
+                products = _parse_search_result(search_result, limit)
+                if products:
+                    return ScrapedSearchResult(
+                        query=normalized_query,
+                        applied_query=normalized_query,
+                        products=products[:limit],
+                        source_url=response.url,
+                        fetch_strategy=f"graphql:{operation}:page:{page}",
+                        parse_strategy="lider_graphql",
+                    )
+                attempts.append(f"{operation}: sin productos parseables")
+            except Exception as exc:
+                attempts.append(f"{operation}: {exc}")
+    finally:
+        session.close()
+
+    raise NoResultsError(normalized_query, attempts=attempts)
 
 
 def fetch_autocomplete_terms(query: str) -> list[str]:
@@ -191,6 +291,7 @@ def fetch_autocomplete_terms(query: str) -> list[str]:
             AUTOCOMPLETE_URL,
             params={"term": normalized_query},
             timeout=REQUEST_TIMEOUT,
+            verify=STORE_SSL_VERIFY,
         )
         response.raise_for_status()
         payload: Any = response.json()
@@ -253,6 +354,13 @@ def _fetch_catalog_page(query: str, page: int, limit: int) -> ScrapedSearchResul
     normalized_query = normalize_query(query)
     attempts: list[str] = []
     had_catalog_response = False
+
+    try:
+        return _fetch_graphql_page(normalized_query, page, limit)
+    except NoResultsError as exc:
+        attempts.extend(exc.attempts)
+    except ScraperError as exc:
+        attempts.append(f"graphql: {exc}")
 
     for strategy_name, url, headers in _candidate_pages(normalized_query, page):
         try:

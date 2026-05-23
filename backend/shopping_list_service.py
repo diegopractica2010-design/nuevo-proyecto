@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 from unicodedata import normalize as unicode_normalize
@@ -198,7 +199,7 @@ def select_best_products(products: list[dict[str, Any]], query: str) -> list[dic
         for product in products
         if product.get("price") is not None
     ]
-    required_tokens = [token for token in _query_tokens(query) if len(token) >= 5]
+    required_tokens = [token for token in _query_tokens(query) if len(token) >= 4]
     if required_tokens:
         filtered = []
         for product in scored:
@@ -212,6 +213,22 @@ def select_best_products(products: list[dict[str, Any]], query: str) -> list[dic
             if all(_word_matches(token, words) for token in required_tokens):
                 filtered.append(product)
         scored = filtered
+
+    unit = _unit_requirement(query)
+    if unit:
+        scored = [
+            product
+            for product in scored
+            if _matches_unit(
+                normalize_compare_text(
+                    " ".join(
+                        str(product.get(key) or "")
+                        for key in ("name", "brand", "category", "seller")
+                    )
+                ),
+                unit,
+            )
+        ]
 
     if _has_charcoal_intent(query):
         scored = [
@@ -232,7 +249,7 @@ def select_best_products(products: list[dict[str, Any]], query: str) -> list[dic
         return []
 
     max_score = max(product["_match_score"] for product in scored)
-    threshold = max(12, int(max_score * 0.75))
+    threshold = max(24, int(max_score * 0.85))
     shortlisted = [product for product in scored if product["_match_score"] >= threshold]
     shortlisted.sort(key=lambda product: (float(product.get("price") or 0), -product["_match_score"]))
     return shortlisted
@@ -244,26 +261,52 @@ def is_specific_query(query: str) -> bool:
 
 
 def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int = 80) -> dict[str, Any]:
-    compared_items: list[dict[str, Any]] = []
+    indexed_items = list(enumerate(items))
+    results_by_item: dict[int, list[dict[str, Any]]] = {index: [] for index, _ in indexed_items}
 
-    for item in items:
-        store_results: list[dict[str, Any]] = []
-        for store in COMPARE_STORES:
+    def compare_store(index: int, item: ShoppingListItem, store: str) -> tuple[int, dict[str, Any]]:
+        try:
             response = search_products(item.query, limit=limit_per_store, store=store)
             products = [_product_to_dict(product) for product in response.results]
             best_options = select_best_products(products, item.query)
             best_product = best_options[0] if best_options else None
-            store_results.append(
-                {
-                    "store": store,
-                    "count": len(products),
-                    "matched_count": len(best_options),
-                    "best": best_product,
-                    "alternatives": best_options[1:4],
-                    "warning": response.warning,
-                    "applied_query": response.applied_query,
-                }
-            )
+            return index, {
+                "store": store,
+                "count": len(products),
+                "matched_count": len(best_options),
+                "best": best_product,
+                "alternatives": best_options[1:4],
+                "warning": response.warning,
+                "applied_query": response.applied_query,
+            }
+        except Exception as exc:
+            return index, {
+                "store": store,
+                "count": 0,
+                "matched_count": 0,
+                "best": None,
+                "alternatives": [],
+                "warning": None,
+                "applied_query": item.query,
+                "error": str(exc),
+            }
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [
+            executor.submit(compare_store, index, item, store)
+            for index, item in indexed_items
+            for store in COMPARE_STORES
+        ]
+        for future in as_completed(futures):
+            index, store_result = future.result()
+            results_by_item[index].append(store_result)
+
+    compared_items: list[dict[str, Any]] = []
+    for index, item in indexed_items:
+        store_results = sorted(
+            results_by_item[index],
+            key=lambda result: COMPARE_STORES.index(result["store"]),
+        )
 
         candidates = [
             result["best"]

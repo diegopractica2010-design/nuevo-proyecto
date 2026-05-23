@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from unicodedata import normalize as unicode_normalize
 from urllib.parse import quote_plus, urljoin
 
 import requests
@@ -14,10 +13,11 @@ from backend.config import (
     JUMBO_PRODUCT_BASE_URL,
     JUMBO_SEARCH_URL,
     REQUEST_TIMEOUT,
+    STORE_SSL_VERIFY,
 )
 from backend.compliance import assert_live_store_access_allowed
 from backend.parser import parse_catalog_page, parse_price_text
-from backend.scraper import NoResultsError, fallback_query_variants, rank_products_for_query
+from backend.scraper import NoResultsError, fallback_query_variants, normalize_query, rank_products_for_query
 
 
 JUMBO_CATALOG_API_URL = "https://sm-web-api.ecomm.cencosud.com/catalog/api/v2/products/search/"
@@ -55,6 +55,13 @@ def _create_session() -> requests.Session:
     return session
 
 
+def _session_get(session: requests.Session, url: str, **kwargs):
+    try:
+        return session.get(url, verify=STORE_SSL_VERIFY, **kwargs)
+    except TypeError:
+        return session.get(url, **kwargs)
+
+
 def _execute_catalog_query(session: requests.Session, query: str, limit: int) -> ScrapedSearchResult:
     """Execute a catalog search query for Jumbo."""
     url = JUMBO_SEARCH_URL.format(query=quote_plus(query))
@@ -71,7 +78,7 @@ def _execute_catalog_query(session: requests.Session, query: str, limit: int) ->
     for profile_name, headers in HTML_HEADER_PROFILES:
         try:
             assert_live_store_access_allowed("jumbo", url, purpose="search")
-            response = session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+            response = _session_get(session, url, headers=headers, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
             parsed = parse_catalog_page(
@@ -120,7 +127,8 @@ def _execute_catalog_api_query(
             params={"ft": query, "page": page, "sc": 11},
         ).prepare()
         assert_live_store_access_allowed("jumbo", request.url or JUMBO_CATALOG_API_URL, purpose="search")
-        response = session.get(
+        response = _session_get(
+            session,
             JUMBO_CATALOG_API_URL,
             params={"ft": query, "page": page, "sc": 11},
             headers=headers,
@@ -293,8 +301,3 @@ def _merge_products(primary: list[dict], secondary: list[dict], limit: int) -> l
         if len(merged) >= limit:
             break
     return merged
-
-
-def normalize_query(query: str) -> str:
-    """Normalize search query."""
-    return unicode_normalize("NFC", query.strip().lower())

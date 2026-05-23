@@ -40,6 +40,13 @@ def cache_set(key: str, value: Any, ttl: int = 600) -> bool:
     return bool(client.set(key, payload, ex=ttl))
 
 
+def cache_delete(*keys: str) -> int:
+    if not keys:
+        return 0
+    client = _get_client()
+    return int(client.delete(*keys))
+
+
 def _get_client():
     global _client
     if _client is not None:

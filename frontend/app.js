@@ -404,7 +404,7 @@ function renderStoreControls() {
   });
 }
 
-async function performSearch(query) {
+async function performSearch(query, retryEnqueued = true) {
   const trimmedQuery = (query || "").trim();
   if (!trimmedQuery) {
     state.error = "Escribe un producto para iniciar la comparacion.";
@@ -438,10 +438,10 @@ async function performSearch(query) {
   renderAll();
 
   try {
-    const response = await fetch(`/search?q=${encodeURIComponent(trimmedQuery)}&limit=100&store=${state.store}`, {
+    let response = await fetch(`/search?q=${encodeURIComponent(trimmedQuery)}&limit=100&store=${state.store}`, {
       signal: controller.signal,
     });
-    const data = await response.json();
+    let data = await response.json();
 
     if (!response.ok) {
       throw new Error(data.detail || "No se pudo completar la busqueda.");
@@ -449,6 +449,26 @@ async function performSearch(query) {
 
     if (state.requestToken !== requestToken) {
       return;
+    }
+
+    if (
+      retryEnqueued &&
+      Number(data.count || 0) === 0 &&
+      String(data.warning || "").toLowerCase().includes("encolada")
+    ) {
+      state.warning = data.warning || "";
+      renderFeedback();
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (state.requestToken !== requestToken) {
+        return;
+      }
+      response = await fetch(`/search?q=${encodeURIComponent(trimmedQuery)}&limit=100&store=${state.store}`, {
+        signal: controller.signal,
+      });
+      data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "No se pudo completar la busqueda.");
+      }
     }
 
     state.results = Array.isArray(data.results) ? data.results : [];
@@ -672,16 +692,19 @@ function renderShoppingCompareRow(item) {
   const storeCards = (item.stores || [])
     .map((storeResult) => {
       const product = storeResult.best;
+      const storeLabel = getStoreConfig(storeResult.store).label;
       return `
         <div class="store-option${cheapest && product && getProductKey(product) === getProductKey(cheapest) ? " is-best" : ""}">
-          <span class="badge">${escapeHtml(getStoreConfig(storeResult.store).label)}</span>
+          <span class="badge">${escapeHtml(storeLabel)}</span>
           ${
             product
               ? `
                 <strong>${formatPrice(product.price)}</strong>
                 <span>${escapeHtml(product.name)}</span>
               `
-              : `<span>No encontrado</span>`
+              : storeResult.error
+                ? `<span>${escapeHtml(storeLabel)} sin datos</span>`
+                : `<span>No encontrado</span>`
           }
         </div>
       `;

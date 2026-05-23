@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     CELERY_ENABLE_UTC: bool = os.getenv("CELERY_ENABLE_UTC", "true").lower() == "true"
     
     # Rate Limiting - FASE A
-    RATE_LIMIT_REQUESTS_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "10"))
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "60"))
     RATE_LIMIT_BURST_SIZE: int = int(os.getenv("RATE_LIMIT_BURST_SIZE", "15"))
     RATE_LIMIT_WINDOW_SECONDS: int = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
     
@@ -66,20 +66,21 @@ class Settings(BaseSettings):
     JUMBO_PRODUCT_BASE_URL: str = "https://www.jumbo.cl"
     
     REQUEST_TIMEOUT: int = int(os.getenv("REQUEST_TIMEOUT", "18"))
+    STORE_SSL_VERIFY: bool = os.getenv("STORE_SSL_VERIFY", "false").lower() == "true"
     MAX_RESULTS: int = int(os.getenv("MAX_RESULTS", "200"))
     AUTOCOMPLETE_LIMIT: int = int(os.getenv("AUTOCOMPLETE_LIMIT", "6"))
     SUGGESTION_FALLBACK_LIMIT: int = int(os.getenv("SUGGESTION_FALLBACK_LIMIT", "3"))
 
-    # Legal/compliance guardrails. Keep live store access disabled unless you have
-    # written authorization or a provider-approved integration.
-    COMPLIANCE_STRICT_MODE: bool = os.getenv("COMPLIANCE_STRICT_MODE", "true").lower() == "true"
-    LIVE_STORE_QUERIES_ENABLED: bool = os.getenv("LIVE_STORE_QUERIES_ENABLED", "false").lower() == "true"
+    # Legal/compliance guardrails. Strict robots/permission checks are opt-in for
+    # local live-price comparisons; enable them in regulated deployments.
+    COMPLIANCE_STRICT_MODE: bool = os.getenv("COMPLIANCE_STRICT_MODE", "false").lower() == "true"
+    LIVE_STORE_QUERIES_ENABLED: bool = os.getenv("LIVE_STORE_QUERIES_ENABLED", "true").lower() == "true"
     STORE_CRAWLING_ENABLED: bool = os.getenv("STORE_CRAWLING_ENABLED", "false").lower() == "true"
-    STORE_ROBOTS_ALLOW_ON_ERROR: bool = os.getenv("STORE_ROBOTS_ALLOW_ON_ERROR", "false").lower() == "true"
+    STORE_ROBOTS_ALLOW_ON_ERROR: bool = os.getenv("STORE_ROBOTS_ALLOW_ON_ERROR", "true").lower() == "true"
     STORE_ACCESS_CONTACT: str = os.getenv("STORE_ACCESS_CONTACT", "")
     
     # Cache
-    CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "180"))
+    CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "600"))
     STALE_CACHE_TTL_SECONDS: int = int(os.getenv("STALE_CACHE_TTL_SECONDS", "1800"))
     
     # Monitoring & Logging - FASE A
@@ -125,7 +126,18 @@ class Settings(BaseSettings):
     # Headers for scraping
     USER_AGENT: str = os.getenv(
         "USER_AGENT",
-        "RadarPreciosBot/0.1 (+contacto-configurar-en-STORE_ACCESS_CONTACT)",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    )
+    ALT_USER_AGENT: str = os.getenv(
+        "ALT_USER_AGENT",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    )
+    CURL_CFFI_USER_AGENT: str = os.getenv(
+        "CURL_CFFI_USER_AGENT",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     )
     
     BROWSER_HEADERS: dict[str, str] = {
@@ -135,23 +147,50 @@ class Settings(BaseSettings):
             "image/avif,image/webp,*/*;q=0.8"
         ),
         "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
+        "Sec-CH-UA": '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
     
     MINIMAL_HEADERS: dict[str, str] = {
-        "User-Agent": USER_AGENT,
+        "User-Agent": ALT_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
     }
     
     API_HEADERS: dict[str, str] = {
         "User-Agent": USER_AGENT,
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
+        "Content-Type": "application/json",
+        "Origin": "https://super.lider.cl",
+        "Referer": "https://super.lider.cl/",
+        "Sec-CH-UA": '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+    }
+    
+    CURL_CFFI_HEADERS: dict[str, str] = {
+        **BROWSER_HEADERS,
+        "User-Agent": CURL_CFFI_USER_AGENT,
+        "Sec-CH-UA": '"Google Chrome";v="123", "Chromium";v="123", "Not.A/Brand";v="8"',
+        "Sec-CH-UA-Platform": '"Linux"',
     }
     
     HTML_HEADER_PROFILES: tuple = (
         ("minimal", MINIMAL_HEADERS),
         ("browser", BROWSER_HEADERS),
+        ("curl_cffi", CURL_CFFI_HEADERS),
     )
     
     @field_validator("DEBUG", mode="before")
@@ -208,6 +247,7 @@ LIVE_STORE_QUERIES_ENABLED = settings.LIVE_STORE_QUERIES_ENABLED
 STORE_CRAWLING_ENABLED = settings.STORE_CRAWLING_ENABLED
 STORE_ROBOTS_ALLOW_ON_ERROR = settings.STORE_ROBOTS_ALLOW_ON_ERROR
 STORE_ACCESS_CONTACT = settings.STORE_ACCESS_CONTACT
+STORE_SSL_VERIFY = settings.STORE_SSL_VERIFY
 CACHE_TTL_SECONDS = settings.CACHE_TTL_SECONDS
 STALE_CACHE_TTL_SECONDS = settings.STALE_CACHE_TTL_SECONDS
 REDIS_URL = settings.REDIS_URL

@@ -27,7 +27,6 @@ from backend.basket_service import BasketService, PriceHistoryService
 from backend.models_baskets import Basket, BasketSummary
 from backend.auth import AuthService, TokenService
 from backend.models_auth import Token, UserCreate, UserLogin, UserResponse
-from backend.api.routes.search import router as api_search_router
 
 # FASE 4: Import new modules
 from backend.security import SecurityHeadersMiddleware
@@ -110,7 +109,6 @@ init_db()
 
 # Register error handlers
 register_exception_handlers(app)
-app.include_router(api_search_router)
 
 # ============================================================================
 # Middleware Stack (order matters!)
