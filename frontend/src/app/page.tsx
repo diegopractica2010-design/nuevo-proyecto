@@ -1,5 +1,5 @@
 import dynamic from "next/dynamic";
-import { AppShell } from "@/components/layout/app-shell";
+import { AppLayout } from "@/layouts/app-layout";
 import { SearchDashboard } from "@/features/search/components/search-dashboard";
 import { ScraperHealthPanel } from "@/features/health/components/scraper-health-panel";
 
@@ -12,7 +12,7 @@ const ShoppingListWorkbench = dynamic(
 
 export default function Home() {
   return (
-    <AppShell>
+    <AppLayout>
       <div className="space-y-8">
         <SearchDashboard />
         <ShoppingListWorkbench />
@@ -28,6 +28,6 @@ export default function Home() {
           <ScraperHealthPanel />
         </div>
       </div>
-    </AppShell>
+    </AppLayout>
   );
 }

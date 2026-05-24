@@ -94,6 +94,10 @@ build/
 # Node modules (si se agrega JS)
 node_modules/
 package-lock.json
+!frontend/package-lock.json
+frontend/.next/
+frontend/out/
+frontend/tsconfig.tsbuildinfo
 
 
 # ============================================================================

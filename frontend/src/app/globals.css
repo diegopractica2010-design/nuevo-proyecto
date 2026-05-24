@@ -2,48 +2,70 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: 222 47% 5%;
-  --foreground: 210 40% 98%;
-  --card: 222 35% 9%;
-  --card-foreground: 210 40% 98%;
-  --primary: 165 86% 55%;
-  --primary-foreground: 222 47% 5%;
-  --secondary: 222 24% 16%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 222 20% 15%;
-  --muted-foreground: 215 18% 70%;
-  --accent: 214 90% 64%;
-  --accent-foreground: 210 40% 98%;
-  --destructive: 0 72% 55%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 215 18% 20%;
-  --input: 215 18% 20%;
-  --ring: 165 86% 55%;
-  --radius: 0.5rem;
+@layer base {
+  :root {
+    /* Colors - Dark Premium Theme */
+    --background: 222 47% 5%;
+    --foreground: 210 40% 98%;
+    --card: 222 35% 9%;
+    --card-foreground: 210 40% 98%;
+    --primary: 165 86% 55%;
+    --primary-foreground: 222 47% 5%;
+    --secondary: 222 24% 16%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 222 20% 15%;
+    --muted-foreground: 215 18% 70%;
+    --accent: 214 90% 64%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 215 18% 20%;
+    --input: 215 18% 20%;
+    --ring: 165 86% 55%;
+    --radius: 0.5rem;
+    
+    /* Extended Colors */
+    --success: 142 71% 45%;
+    --warning: 38 92% 50%;
+    --info: 210 97% 57%;
+    
+    /* Shadows */
+    --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply min-h-screen bg-background text-foreground;
+    background:
+      linear-gradient(180deg, rgba(45, 212, 191, 0.055), transparent 22rem),
+      linear-gradient(120deg, rgba(96, 165, 250, 0.045), transparent 34rem),
+      hsl(var(--background));
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  ::selection {
+    @apply bg-primary/30 text-foreground;
+  }
 }
 
-* {
-  border-color: hsl(var(--border));
-}
-
-html {
-  color-scheme: dark;
-  scroll-behavior: smooth;
-}
-
-body {
-  min-height: 100vh;
-  background:
-    linear-gradient(180deg, rgba(45, 212, 191, 0.055), transparent 22rem),
-    linear-gradient(120deg, rgba(96, 165, 250, 0.045), transparent 34rem),
-    hsl(var(--background));
-  color: hsl(var(--foreground));
-  font-feature-settings: "rlig" 1, "calt" 1;
-}
-
-::selection {
-  background: rgba(45, 212, 191, 0.35);
+/* Glass Morphism */
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .glass-line {
@@ -58,3 +80,123 @@ body {
   border-radius: inherit;
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.animate-slide-in-up {
+  animation: slideInUp 0.3s ease-out;
+}
+
+.animate-slide-in-down {
+  animation: slideInDown 0.3s ease-out;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft 0.3s ease-out;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.3s ease-out;
+}
+
+/* Utility Classes */
+.truncate-lines {
+  display: -webkit-box;
+  -webkit-line-clamp: var(--truncate-lines, 2);
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Premium Blur Effects */
+.blur-glass {
+  backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Glow Effects */
+.glow {
+  box-shadow: 0 0 20px rgba(45, 212, 191, 0.3);
+}
+
+.glow-accent {
+  box-shadow: 0 0 20px rgba(96, 165, 250, 0.2);
+}
+

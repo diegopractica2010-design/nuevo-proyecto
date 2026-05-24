@@ -8,7 +8,7 @@ El foco actual es estabilizar el flujo principal:
 
 - `GET /search` busca productos en vivo por tienda (`lider` o `jumbo`).
 - `POST /shopping-list/compare` compara Lider y Jumbo por item y devuelve la mejor opcion encontrada.
-- El frontend es vanilla JS servido por FastAPI.
+- El frontend es una app Next.js/React/TypeScript exportada como estatico y servida por FastAPI.
 - Redis se usa como cache compartido cuando esta disponible; en desarrollo hay fallback local en memoria.
 - La infraestructura de monitoreo, Celery, backups y despliegue existe en el repo, pero no debe tratarse como garantia de produccion lista sin validacion operacional.
 
@@ -24,6 +24,13 @@ El foco actual es estabilizar el flujo principal:
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+
+cd frontend
+$env:NODE_OPTIONS='--use-system-ca' # solo si npm no confia en el CA local de Windows
+npm install
+npm run build
+cd ..
+
 python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
@@ -31,6 +38,22 @@ Abrir:
 
 - App: http://localhost:8001
 - API docs: http://localhost:8001/docs
+
+Para trabajar solo en UI:
+
+```bash
+cd frontend
+$env:NEXT_PUBLIC_API_BASE_URL='http://localhost:8001'
+npm run dev
+```
+
+## Frontend
+
+- Stack: Next.js App Router, React, TypeScript, TailwindCSS, shadcn/ui-style primitives, Framer Motion, Zustand y React Query.
+- Estructura: `src/app`, `src/features`, `src/components`, `src/services`, `src/hooks`, `src/stores`, `src/layouts`, `src/types`.
+- Build: `npm run build` genera `frontend/out`, que FastAPI sirve desde `/` y `/_next`.
+- Estado servidor: React Query gestiona `/search`, `/shopping-list/compare` y `/health/scraper`.
+- Estado local: Zustand mantiene tienda activa, favoritos y busquedas recientes.
 
 ## API Principal
 
@@ -45,6 +68,9 @@ Abrir:
 
 ```bash
 .\venv\Scripts\python.exe -m pytest -q
+cd frontend
+npm run typecheck
+npm run build
 ```
 
 Los tests live contra supermercados estan desactivados por defecto para evitar fallas por red o anti-bot externo. Para ejecutarlos:
