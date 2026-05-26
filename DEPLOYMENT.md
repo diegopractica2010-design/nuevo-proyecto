@@ -499,6 +499,173 @@ print(msg)
 
 ---
 
+## First-Deploy Steps (Docker Compose)
+
+Complete checklist for a fresh local or server deployment using `docker-compose`.
+
+### Prerequisites
+
+```bash
+# Docker 24+ and Docker Compose v2+ required
+docker --version
+docker compose version
+```
+
+### 1. Clone and configure
+
+```bash
+git clone <your-repo-url>
+cd nuevo-proyecto
+
+# Create environment file
+cp .env.example .env
+
+# Edit required values (at minimum these three):
+#   JWT_SECRET_KEY  — generate with: openssl rand -base64 32
+#   POSTGRES_PASSWORD
+#   REDIS_PASSWORD
+nano .env
+```
+
+### 2. Create data directories
+
+```bash
+mkdir -p data/logs data/backups
+```
+
+### 3. Start the stack
+
+```bash
+# Build images and start all services in the background
+docker-compose up -d --build
+
+# Watch startup logs
+docker-compose logs -f app
+```
+
+The `app` service automatically runs `alembic upgrade head` before starting
+uvicorn, so migrations are applied on every container start.
+
+### 4. Verify everything is healthy
+
+```bash
+# All services should show "healthy" or "running"
+docker-compose ps
+
+# Application health endpoint
+curl http://localhost:8001/health
+
+# Status dashboard (no auth required)
+curl http://localhost:8001/status
+```
+
+### 5. Bootstrap the first admin user
+
+```bash
+# 1. Register a normal user via the API
+curl -X POST http://localhost:8001/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","email":"admin@example.com","password":"changeme123"}'
+
+# 2. Promote to admin (only works when zero admins exist)
+curl -X POST "http://localhost:8001/admin/promote?username=admin"
+```
+
+### 6. Run Alembic migrations manually (if needed)
+
+```bash
+# From inside the running app container
+docker-compose exec app alembic upgrade head
+
+# Or against PostgreSQL directly from host
+DATABASE_URL=postgresql://radar:radar123@localhost:5432/radar_precios \
+  alembic upgrade head
+```
+
+### 7. Run the PostgreSQL integration tests
+
+```bash
+DATABASE_URL=postgresql://radar:radar123@localhost:5432/radar_precios \
+  pytest tests/test_persistence.py::TestPostgresIntegration -v
+```
+
+### Stopping / resetting
+
+```bash
+# Stop services (keep volumes)
+docker-compose down
+
+# Full reset including volumes (destroys all data!)
+docker-compose down -v
+```
+
+---
+
+## Slack Webhook Setup
+
+### 1. Create a Slack app and incoming webhook
+
+1. Go to <https://api.slack.com/apps> → **Create New App** → **From scratch**
+2. Choose workspace and give the app a name (e.g. "Radar de Precios")
+3. Under **Features** → **Incoming Webhooks** → toggle **On**
+4. Click **Add New Webhook to Workspace** → pick the target channel → **Allow**
+5. Copy the webhook URL (format: `https://hooks.slack.com/services/T.../B.../...`)
+
+### 2. Add to your environment
+
+```bash
+# In .env
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+SLACK_CHANNEL=#alerts
+```
+
+### 3. Test the alert
+
+```bash
+# Login to get a JWT token
+TOKEN=$(curl -s -X POST http://localhost:8001/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"changeme123"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+# Send test alert
+curl -X POST http://localhost:8001/admin/test-alert \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 4. Alertmanager integration
+
+`alertmanager.yml` is pre-configured with `${SLACK_WEBHOOK_URL}` placeholders.
+The `alertmanager` service in `docker-compose.monitoring.yml` uses
+`--config.expandenv` to substitute env vars at startup.
+
+Add `SLACK_WEBHOOK_URL` to your `.env` before starting the monitoring stack:
+
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+```
+
+---
+
+## Required GitHub Secrets
+
+Configure these in **Settings → Secrets and variables → Actions** on your repository.
+
+| Secret name | Description |
+|---|---|
+| `DEPLOY_KEY` | SSH deploy key or token that gates all deploy jobs. Without this secret the deploy workflow skips silently. |
+| `AWS_ACCESS_KEY_ID_STAGING` | AWS IAM key ID with ECS deploy permissions for the staging environment. |
+| `AWS_SECRET_ACCESS_KEY_STAGING` | AWS IAM secret key for staging. |
+| `AWS_ECR_REGISTRY_STAGING` | ECR registry URL for staging (e.g. `123456789.dkr.ecr.us-east-1.amazonaws.com`). |
+| `AWS_ACCESS_KEY_ID_PRODUCTION` | AWS IAM key ID for production. |
+| `AWS_SECRET_ACCESS_KEY_PRODUCTION` | AWS IAM secret key for production. |
+| `AWS_ECR_REGISTRY_PRODUCTION` | ECR registry URL for production. |
+| `SLACK_WEBHOOK_URL` | Slack incoming webhook URL for deploy notifications. |
+
+> All deploy jobs check `secrets.DEPLOY_KEY != ''` before running. Set `DEPLOY_KEY`
+> to any non-empty string to enable deployments (e.g. the value of your SSH private key).
+
+---
+
 ## Links Útiles
 
 - [AWS ECS Best Practices](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/recommended-practices.html)

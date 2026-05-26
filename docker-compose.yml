@@ -18,10 +18,10 @@ services:
     networks:
       - radar-network
 
-  # PostgreSQL - Main Database (optional, for Fase C)
-  postgres:
+  # PostgreSQL - Primary Database
+  db:
     image: postgres:16-alpine
-    container_name: radar-postgres
+    container_name: radar-db
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-radar_precios}
       POSTGRES_USER: ${POSTGRES_USER:-radar}
@@ -32,10 +32,10 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radar}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radar} -d ${POSTGRES_DB:-radar_precios}"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
     networks:
       - radar-network
 
@@ -48,37 +48,41 @@ services:
     ports:
       - "8001:8001"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://radar:radar123@postgres:5432/radar_precios}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://radar:radar123@db:5432/radar_precios}
       REDIS_URL: ${REDIS_URL:-redis://:redis123@redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:redis123@redis:6379/1}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:redis123@redis:6379/2}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-change-in-production}
     volumes:
       - .:/app
       - ./data:/app/data
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
+      db:
         condition: service_healthy
-    command: python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8001
+    command: >
+      sh -c "python -m alembic upgrade head &&
+             python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8001"
     networks:
       - radar-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 20s
 
-  # Celery Worker - Scraping Tasks
-  celery_worker:
+  # Celery Worker - Background Tasks
+  worker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: radar-celery-worker
+    container_name: radar-worker
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://radar:radar123@postgres:5432/radar_precios}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://radar:radar123@db:5432/radar_precios}
       REDIS_URL: ${REDIS_URL:-redis://:redis123@redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:redis123@redis:6379/1}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:redis123@redis:6379/2}
@@ -90,20 +94,26 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
+      db:
         condition: service_healthy
     command: python -m celery -A backend.celery_app worker --loglevel=info --concurrency=4
     networks:
       - radar-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -m celery -A backend.celery_app inspect ping -d celery@$$HOSTNAME --timeout 5 2>/dev/null | grep -q pong || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
 
   # Celery Beat - Scheduled Tasks
-  celery_beat:
+  beat:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: radar-celery-beat
+    container_name: radar-beat
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://radar:radar123@postgres:5432/radar_precios}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://radar:radar123@db:5432/radar_precios}
       REDIS_URL: ${REDIS_URL:-redis://:redis123@redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:redis123@redis:6379/1}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://:redis123@redis:6379/2}
@@ -115,11 +125,17 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      postgres:
+      db:
         condition: service_healthy
-    command: python -m celery -A backend.celery_app beat --loglevel=info
+    command: python -m celery -A backend.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     networks:
       - radar-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -m celery -A backend.celery_app inspect ping --timeout 5 2>/dev/null | grep -q pong || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
 
 volumes:
   redis_data:

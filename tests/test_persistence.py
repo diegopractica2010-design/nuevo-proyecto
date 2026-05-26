@@ -1,8 +1,63 @@
+import os
 import unittest
+
+import pytest
 
 from backend.auth import AuthService
 from backend.basket_service import BasketService, PriceHistoryService
 from backend.db import reset_db
+
+# ---------------------------------------------------------------------------
+# PostgreSQL integration tests — skipped unless DATABASE_URL points to Postgres
+# ---------------------------------------------------------------------------
+_DB_URL = os.getenv("DATABASE_URL", "")
+_IS_POSTGRES = _DB_URL.startswith("postgresql")
+
+
+@pytest.mark.skipif(not _IS_POSTGRES, reason="Requires DATABASE_URL=postgresql://...")
+class TestPostgresIntegration:
+    """Run Alembic migrations and basic CRUD against a real PostgreSQL instance."""
+
+    def test_migrations_run_cleanly(self):
+        from alembic import command
+        from alembic.config import Config
+
+        cfg = Config("alembic.ini")
+        cfg.set_main_option("sqlalchemy.url", _DB_URL)
+        command.upgrade(cfg, "head")
+
+    def test_tables_exist_after_migration(self):
+        from sqlalchemy import create_engine, inspect as sa_inspect
+
+        engine = create_engine(_DB_URL)
+        try:
+            tables = sa_inspect(engine).get_table_names()
+        finally:
+            engine.dispose()
+
+        for expected in ("users", "baskets", "basket_items", "price_history"):
+            assert expected in tables, f"Table '{expected}' missing after migration"
+
+    def test_role_column_exists_on_users(self):
+        from sqlalchemy import create_engine, inspect as sa_inspect
+
+        engine = create_engine(_DB_URL)
+        try:
+            cols = {c["name"] for c in sa_inspect(engine).get_columns("users")}
+        finally:
+            engine.dispose()
+
+        assert "role" in cols, "Column 'role' missing from users table"
+
+    def test_create_and_fetch_user(self):
+        from backend.db import reset_db
+
+        reset_db()
+        user = AuthService.create_user("pg_user", "pg@test.com", "secret123")
+        loaded = AuthService.get_user("pg_user")
+        assert loaded is not None
+        assert loaded.email == "pg@test.com"
+        assert loaded.role == "user"
 
 
 class PersistenceTests(unittest.TestCase):
