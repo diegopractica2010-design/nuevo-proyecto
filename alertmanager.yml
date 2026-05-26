@@ -1,23 +1,26 @@
 global:
   resolve_timeout: 5m
+  # SLACK_WEBHOOK_URL is injected as an environment variable.
+  # Requires alertmanager >= 0.24 started with --config.expandenv flag.
+  # Set SLACK_WEBHOOK_URL in your .env (or docker-compose environment block).
+  slack_api_url: '${SLACK_WEBHOOK_URL}'
 
-# Slack webhook configuration
 route:
-  receiver: 'default'
+  receiver: 'slack'
   group_by: ['alertname', 'cluster', 'service']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 24h
 
   routes:
-    # Critical alerts go directly to ops
+    # Critical alerts go directly to #alerts-critical
     - match:
         severity: critical
       receiver: 'slack-critical'
       group_wait: 10s
       repeat_interval: 4h
 
-    # Business alerts go to team
+    # Business alerts go to team channel
     - match:
         component: business
       receiver: 'slack-business'
@@ -26,23 +29,24 @@ route:
     # Default warning alerts
     - match:
         severity: warning
-      receiver: 'slack-warnings'
+      receiver: 'slack'
       repeat_interval: 6h
 
-# Receivers (notification channels)
+# Receivers — all use ${SLACK_WEBHOOK_URL} expanded via --config.expandenv
 receivers:
-  - name: 'default'
+  - name: 'slack'
     slack_configs:
       - api_url: '${SLACK_WEBHOOK_URL}'
         channel: '${SLACK_CHANNEL:-#alerts}'
         title: '{{ .GroupLabels.alertname }}'
         text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        send_resolved: true
 
   - name: 'slack-critical'
     slack_configs:
       - api_url: '${SLACK_WEBHOOK_URL}'
         channel: '#alerts-critical'
-        title: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+        title: ':rotating_light: CRITICAL: {{ .GroupLabels.alertname }}'
         text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
         color: 'danger'
         send_resolved: true
@@ -51,26 +55,15 @@ receivers:
     slack_configs:
       - api_url: '${SLACK_WEBHOOK_URL}'
         channel: '#alerts-business'
-        title: '📊 Business Alert: {{ .GroupLabels.alertname }}'
+        title: ':bar_chart: Business Alert: {{ .GroupLabels.alertname }}'
         text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
         color: 'warning'
-
-  - name: 'slack-warnings'
-    slack_configs:
-      - api_url: '${SLACK_WEBHOOK_URL}'
-        channel: '${SLACK_CHANNEL:-#alerts}'
-        title: '⚠️ {{ .GroupLabels.alertname }}'
-        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        send_resolved: true
 
 inhibit_rules:
-  # Don't send warning if critical is firing
+  # Suppress warning when critical is already firing for the same alert
   - source_match:
       severity: critical
     target_match:
       severity: warning
-    equal: ['alertname']
-
-  # Don't repeat resolved alerts too often
-  - source_match:
-      severity: info
     equal: ['alertname']

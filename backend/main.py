@@ -635,6 +635,23 @@ def promote_user(username: str = Query(..., description="Username to promote to 
     return {"status": "success", "username": username, "role": "admin"}
 
 
+@app.post("/admin/test-alert", include_in_schema=False)
+async def test_alert(username: str = Depends(require_admin)):
+    """Send a test Slack alert to verify SLACK_WEBHOOK_URL is configured (admin-only)."""
+    from backend.alerts import AlertManager, AlertLevel
+
+    logger.info(f"Test alert triggered by {username}")
+    sent = await AlertManager.send_slack_alert(
+        message="This is a test alert from Radar de Precios. If you see this, Slack alerts are working.",
+        title="Test Alert — Radar de Precios",
+        level=AlertLevel.INFO,
+        additional_info={"triggered_by": username},
+    )
+    if sent:
+        return {"status": "sent", "message": "Test alert sent to Slack successfully"}
+    return {"status": "failed", "message": "Failed to send alert — check SLACK_WEBHOOK_URL in config"}
+
+
 # ============================================================================
 # Signal Handlers for SIGTERM/SIGINT (Docker/K8s)
 # ============================================================================
