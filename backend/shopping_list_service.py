@@ -7,6 +7,7 @@ from typing import Any
 from unicodedata import normalize as unicode_normalize
 
 from backend.domain.normalization.matching import canonicalize
+from backend.application.use_cases.normalize_product import find_competitor_price
 from backend.search_service import search_products
 
 
@@ -362,6 +363,20 @@ def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int
             if result.get("best")
         ]
         same_product = len(canonical_keys) >= 2 and len(set(canonical_keys)) == 1
+
+        # Add competitor_price to each store result using canonicalize matching
+        for result in store_results:
+            own_store = result.get("store", "")
+            best = result.get("best")
+            if best:
+                best_name = " ".join(
+                    str(best.get(k) or "") for k in ("name", "brand") if best.get(k)
+                )
+                result["competitor_price"] = find_competitor_price(
+                    best_name, store_results, own_store
+                )
+            else:
+                result["competitor_price"] = None
 
         compared_items.append(
             {
