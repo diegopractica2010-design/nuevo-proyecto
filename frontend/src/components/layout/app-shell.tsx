@@ -1,8 +1,11 @@
 "use client";
 
-import { BarChart3, Command, LineChart, LogOut, Menu, Radar, Search, Settings, ShoppingBasket, User, X } from "lucide-react";
+import { BarChart3, Command, LineChart, LogOut, Menu, Radar, Settings, ShoppingBasket, User, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ScraperHealthPanel } from "@/features/health/components/scraper-health-panel";
+import { AuthModal } from "@/features/auth/components/auth-modal";
+import { Button } from "@/components/ui/button";
+import { useAppStore } from "@/stores/use-app-store";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -20,6 +23,8 @@ const userMenu = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const authUsername = useAppStore((s) => s.authUsername);
+  const logout = useAppStore((s) => s.logout);
 
   return (
     <div className="min-h-screen">
@@ -64,6 +69,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="hidden md:flex">
                 <ScraperHealthPanel compact />
               </div>
+
+              {/* Auth */}
+              {authUsername ? (
+                <div className="flex items-center gap-2">
+                  <span className="hidden sm:flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <User className="h-3.5 w-3.5" />
+                    {authUsername}
+                  </span>
+                  <Button variant="ghost" size="sm" onClick={logout} aria-label="Logout">
+                    <LogOut className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <AuthModal />
+              )}
 
               {/* Mobile Menu Button */}
               <button

@@ -1,4 +1,4 @@
-import type { CompareResponse, ScraperHealthResponse, SearchResponse, StoreId } from "@/types/api";
+import type { AuthToken, CompareResponse, PriceHistoryResponse, ScraperHealthResponse, SearchResponse, StoreId, UserLoginRequest, UserRegisterRequest, UserResponse } from "@/types/api";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
@@ -8,11 +8,18 @@ interface SearchParams {
   limit?: number;
 }
 
+function getAuthHeader(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const token = localStorage.getItem("auth_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...getAuthHeader(),
       ...init?.headers
     }
   });
@@ -42,5 +49,28 @@ export const apiClient = {
     return request<ScraperHealthResponse>("/health/scraper", {
       cache: "no-store"
     });
+  },
+
+  login(body: UserLoginRequest) {
+    return request<AuthToken>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+  },
+
+  register(body: UserRegisterRequest) {
+    return request<UserResponse>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+  },
+
+  getMe() {
+    return request<UserResponse>("/auth/me");
+  },
+
+  getPriceHistory(product_id: string, store: StoreId) {
+    const params = new URLSearchParams({ store });
+    return request<PriceHistoryResponse>(`/price-history/${encodeURIComponent(product_id)}?${params.toString()}`);
   }
 };

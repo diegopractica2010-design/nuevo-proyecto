@@ -82,6 +82,50 @@ export interface CompareResponse {
   estimated_total: number;
 }
 
+export interface AuthToken {
+  access_token: string;
+  token_type: string;
+}
+
+export interface UserLoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface UserRegisterRequest {
+  username: string;
+  email: string;
+  password: string;
+}
+
+export interface UserResponse {
+  username: string;
+  email: string;
+}
+
+export interface PriceHistoryPoint {
+  product_id: string;
+  store: string;
+  price: number;
+  date: string;
+  url?: string | null;
+}
+
+export interface PriceHistoryTrends {
+  current_price: number | null;
+  min_price: number | null;
+  max_price: number | null;
+  trend: string | null;
+  history_count?: number;
+}
+
+export interface PriceHistoryResponse {
+  product_id: string;
+  store: string;
+  history: PriceHistoryPoint[];
+  trends: PriceHistoryTrends;
+}
+
 export interface ScraperHealthStore {
   status: "ok" | "degraded" | "down" | string;
   timestamp?: string;
