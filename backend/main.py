@@ -525,6 +525,26 @@ def get_current_user(authorization: str = Header(None, description="JWT token (B
     return UserResponse(username=user.username, email=user.email)
 
 
+@app.post("/auth/refresh", response_model=Token)
+def refresh_token(authorization: str = Header(None, description="JWT token (Bearer)")):
+    """Refresh JWT token: accepts a valid Bearer token, returns a new one with reset TTL."""
+    logger.info("Token refresh attempt")
+    
+    # Validate current token
+    username = _username_from_authorization(authorization, required=True)
+    
+    # Verify user exists
+    user = AuthService.get_user(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Create new token with reset TTL
+    new_token = TokenService.create_access_token(data={"sub": username})
+    logger.info(f"Token refreshed for user: {username}")
+    
+    return Token(access_token=new_token, token_type="bearer")
+
+
 # ============================================================================
 # FASE 4: Prometheus Metrics Endpoint
 # ============================================================================

@@ -22,6 +22,7 @@ def _get_secret_key() -> str:
     if secret:
         if len(secret) < 32:
             raise ValueError("JWT_SECRET_KEY debe tener al menos 32 caracteres")
+        logger.info("JWT_SECRET_KEY configured and fixed (from environment)")
         return secret
 
     env = os.getenv("ENVIRONMENT", "development")
@@ -34,8 +35,8 @@ def _get_secret_key() -> str:
 
     secret = secrets.token_hex(32)
     logger.warning(
-        "JWT_SECRET_KEY no configurado. Usando clave temporal. "
-        "Los JWT se invalidaran en cada restart. Solo aceptable en desarrollo."
+        "JWT_SECRET_KEY not configured in development. Using ephemeral key. "
+        "Tokens will be invalid after server restart. This is only acceptable for development."
     )
     return secret
 
