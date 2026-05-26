@@ -286,7 +286,9 @@ def _persist_search_response_async(response: SearchResponse) -> None:
 
 
 def _store_display_name(store: str) -> str:
-    return "Lider" if store == "lider" else "Jumbo" if store == "jumbo" else store.title()
+    from backend.store_adapters import STORE_ADAPTERS
+    adapter = STORE_ADAPTERS.get(store)
+    return adapter.display_name if adapter else store.title()
 
 
 def _get_or_create_store(session, store: str) -> StoreRecord:

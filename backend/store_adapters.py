@@ -39,3 +39,7 @@ STORE_ADAPTERS: dict[str, StoreAdapter] = {
 
 def get_store_adapter(store: str) -> StoreAdapter | None:
     return STORE_ADAPTERS.get((store or "lider").strip().lower())
+
+
+def list_stores() -> list[StoreAdapter]:
+    return list(STORE_ADAPTERS.values())

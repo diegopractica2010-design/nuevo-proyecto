@@ -234,6 +234,15 @@ def scraper_health():
         return {"status": "unavailable", "error": str(exc)}
 
 
+@app.get("/stores")
+def get_stores():
+    from backend.store_adapters import list_stores
+    return [
+        {"id": s.name, "display_name": s.display_name, "experimental": s.experimental}
+        for s in list_stores()
+    ]
+
+
 @app.get("/search", response_model=SearchResponse)
 def search(
     query: Optional[str] = Query(None, min_length=1, description="Nombre del producto"),

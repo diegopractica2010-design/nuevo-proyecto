@@ -11,7 +11,8 @@ from backend.application.use_cases.normalize_product import find_competitor_pric
 from backend.search_service import search_products
 
 
-COMPARE_STORES = ("lider", "jumbo")
+from backend.store_adapters import STORE_ADAPTERS
+COMPARE_STORES = tuple(STORE_ADAPTERS.keys())
 
 STOPWORDS = {
     "de",
