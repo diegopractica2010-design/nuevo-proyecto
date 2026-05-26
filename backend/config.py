@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     
     JUMBO_SEARCH_URL: str = "https://www.jumbo.cl/busqueda?ft={query}"
     JUMBO_PRODUCT_BASE_URL: str = "https://www.jumbo.cl"
+    JUMBO_API_KEY: str = os.getenv("JUMBO_API_KEY", "")
     
     REQUEST_TIMEOUT: int = int(os.getenv("REQUEST_TIMEOUT", "18"))
     STORE_SSL_VERIFY: bool = os.getenv("STORE_SSL_VERIFY", "false").lower() == "true"
@@ -238,6 +239,7 @@ AUTOCOMPLETE_URL = settings.AUTOCOMPLETE_URL
 PRODUCT_BASE_URL = settings.PRODUCT_BASE_URL
 JUMBO_SEARCH_URL = settings.JUMBO_SEARCH_URL
 JUMBO_PRODUCT_BASE_URL = settings.JUMBO_PRODUCT_BASE_URL
+JUMBO_API_KEY = settings.JUMBO_API_KEY
 REQUEST_TIMEOUT = settings.REQUEST_TIMEOUT
 MAX_RESULTS = settings.MAX_RESULTS
 AUTOCOMPLETE_LIMIT = settings.AUTOCOMPLETE_LIMIT

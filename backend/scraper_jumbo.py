@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote_plus, urljoin
@@ -12,6 +13,7 @@ from backend.config import (
     HTML_HEADER_PROFILES,
     JUMBO_PRODUCT_BASE_URL,
     JUMBO_SEARCH_URL,
+    JUMBO_API_KEY,
     REQUEST_TIMEOUT,
     STORE_SSL_VERIFY,
 )
@@ -21,7 +23,16 @@ from backend.scraper import NoResultsError, fallback_query_variants, normalize_q
 
 
 JUMBO_CATALOG_API_URL = "https://sm-web-api.ecomm.cencosud.com/catalog/api/v2/products/search/"
-JUMBO_CATALOG_API_KEY = "WlVnnB7c1BblmgUPOfg"
+
+logger = logging.getLogger(__name__)
+
+# Log API key status on module load
+if not JUMBO_API_KEY:
+    logger.warning(
+        "JUMBO_API_KEY not configured. Jumbo search via catalog API will be disabled. "
+        "Set JUMBO_API_KEY environment variable to enable catalog API search for Jumbo."
+    )
+
 
 
 @dataclass(slots=True)
@@ -108,8 +119,14 @@ def _execute_catalog_api_query(
     limit: int,
 ) -> ScrapedSearchResult:
     """Fetch Jumbo products from the public catalog API used by the frontend."""
+    if not JUMBO_API_KEY:
+        raise NoResultsError(
+            query,
+            attempts=["catalog_api: JUMBO_API_KEY not configured - catalog API search disabled"]
+        )
+    
     headers = {
-        "apiKey": JUMBO_CATALOG_API_KEY,
+        "apiKey": JUMBO_API_KEY,
         "Accept": "application/json, text/plain, */*",
         "Origin": "https://www.jumbo.cl",
         "Referer": JUMBO_SEARCH_URL.format(query=quote_plus(query)),
