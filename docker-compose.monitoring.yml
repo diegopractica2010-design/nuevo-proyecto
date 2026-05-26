@@ -62,12 +62,16 @@ services:
     container_name: radar-alertmanager
     ports:
       - "9093:9093"
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SLACK_CHANNEL: ${SLACK_CHANNEL:-#alerts}
     volumes:
       - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--storage.path=/alertmanager'
+      - '--config.expandenv'
     depends_on:
       - prometheus
     networks:
@@ -120,7 +124,7 @@ services:
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
     depends_on:
       - redis
-      - celery_worker
+      - worker
     networks:
       - radar-network
     command: celery --broker=${CELERY_BROKER_URL} flower --port=5555
