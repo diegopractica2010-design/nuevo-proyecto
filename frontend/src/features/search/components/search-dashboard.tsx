@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Coffee, Milk, ShoppingBag, Sparkles, Wheat, Wind,
+  ArrowDown01, ArrowUp01, ArrowDownUp, Coffee, Milk, ShoppingBag, Sparkles, Wheat, Wind,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSearchProducts } from "@/hooks/use-search-products";
@@ -35,25 +35,35 @@ function useCyclingPlaceholder(strings: string[], ms = 2600) {
 // ── Quick pills ────────────────────────────────────────────────────────────
 
 const PILLS: Array<{ label: string; icon: typeof Milk; q: string }> = [
-  { label: "Leche",       icon: Milk,       q: "leche entera 1 litro" },
-  { label: "Arroz",       icon: Wheat,      q: "arroz 1 kilo" },
-  { label: "Café",        icon: Coffee,     q: "café molido" },
-  { label: "Detergente",  icon: Wind,       q: "detergente ropa" },
-  { label: "Bolsas",      icon: ShoppingBag,q: "bolsas basura" },
+  { label: "Leche",       icon: Milk,        q: "leche entera 1 litro" },
+  { label: "Arroz",       icon: Wheat,       q: "arroz 1 kilo" },
+  { label: "Café",        icon: Coffee,      q: "café molido" },
+  { label: "Detergente",  icon: Wind,        q: "detergente ropa" },
+  { label: "Bolsas",      icon: ShoppingBag, q: "bolsas basura" },
 ];
+
+type SortOrder = "default" | "asc" | "desc";
 
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function SearchDashboard() {
-  const activeStore = useAppStore((s) => s.activeStore);
+  const activeStore   = useAppStore((s) => s.activeStore);
   const pushRecentQuery = useAppStore((s) => s.pushRecentQuery);
   const recentQueries = useAppStore((s) => s.recentQueries);
 
-  const [draft, setDraft] = useState("");
-  const [query, setQuery] = useState("");
+  const [draft, setDraft]           = useState("");
+  const [query, setQuery]           = useState("");
+  const [sortOrder, setSortOrder]   = useState<SortOrder>("default");
+  const [brandFilter, setBrandFilter] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const placeholder = useCyclingPlaceholder(PLACEHOLDERS);
   const search = useSearchProducts(query, activeStore);
+
+  // Reset controls when query or store changes
+  useEffect(() => {
+    setSortOrder("default");
+    setBrandFilter(null);
+  }, [query, activeStore]);
 
   function fire(q: string) {
     const trimmed = q.trim();
@@ -67,6 +77,20 @@ export function SearchDashboard() {
     e.preventDefault();
     fire(draft);
   }
+
+  const allProducts  = search.data?.results ?? [];
+  const brands       = search.data?.facets.brands ?? [];
+
+  const filteredSorted = useMemo(() => {
+    let list = brandFilter
+      ? allProducts.filter((p) => p.brand === brandFilter)
+      : allProducts;
+    if (sortOrder === "asc")  list = [...list].sort((a, b) => a.price - b.price);
+    if (sortOrder === "desc") list = [...list].sort((a, b) => b.price - a.price);
+    return list;
+  }, [allProducts, sortOrder, brandFilter]);
+
+  const hasResults = !!search.data && search.data.count > 0;
 
   return (
     <section className="space-y-8">
@@ -168,21 +192,98 @@ export function SearchDashboard() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
+            className="space-y-4"
           >
-            {search.data && search.data.count > 0 && (
-              <p className="mb-4 text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">{search.data.count}</span> resultados
-                para &ldquo;{query}&rdquo; en{" "}
-                <span className="font-medium capitalize text-foreground">{activeStore}</span>
-                {search.data.strategy ? (
-                  <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-[10px]">
-                    {search.data.strategy}
-                  </span>
-                ) : null}
-              </p>
+            {/* Result count + controls bar */}
+            {hasResults && (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">{search.data!.count}</span>{" "}
+                  resultados para &ldquo;{query}&rdquo;
+                  {search.data?.strategy ? (
+                    <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-[10px]">
+                      {search.data.strategy}
+                    </span>
+                  ) : null}
+                </p>
+
+                {/* Sort buttons */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">Precio:</span>
+                  <button
+                    type="button"
+                    onClick={() => setSortOrder(sortOrder === "asc" ? "default" : "asc")}
+                    className={cn(
+                      "flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
+                      sortOrder === "asc"
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-primary"
+                    )}
+                  >
+                    <ArrowUp01 className="h-3.5 w-3.5" />
+                    Menor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSortOrder(sortOrder === "desc" ? "default" : "desc")}
+                    className={cn(
+                      "flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
+                      sortOrder === "desc"
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-primary"
+                    )}
+                  >
+                    <ArrowDown01 className="h-3.5 w-3.5" />
+                    Mayor
+                  </button>
+                  {sortOrder !== "default" && (
+                    <button
+                      type="button"
+                      onClick={() => setSortOrder("default")}
+                      className="flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <ArrowDownUp className="h-3 w-3" />
+                      Relevancia
+                    </button>
+                  )}
+                </div>
+              </div>
             )}
+
+            {/* Brand filter chips */}
+            {hasResults && brands.length > 1 && (
+              <div className="flex flex-wrap gap-1.5">
+                {brandFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setBrandFilter(null)}
+                    className="rounded-full border border-primary bg-primary/10 px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
+                  >
+                    ✕ {brandFilter}
+                  </button>
+                )}
+                {brands.slice(0, 8).map(({ name, count }) =>
+                  name && name !== brandFilter ? (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setBrandFilter(name)}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                        "border-border bg-background text-muted-foreground",
+                        "hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+                      )}
+                    >
+                      {name}
+                      <span className="ml-1 text-[10px] opacity-60">{count}</span>
+                    </button>
+                  ) : null
+                )}
+              </div>
+            )}
+
             <ProductGrid
-              products={search.data?.results ?? []}
+              products={filteredSorted}
               isLoading={search.isFetching}
               emptyQuery={query}
             />

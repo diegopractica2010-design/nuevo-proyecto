@@ -54,6 +54,8 @@ class ProductRecord(Base):
     canonical_key: Mapped[str] = mapped_column(String(500), unique=True, nullable=False)
     canonical_name: Mapped[str] = mapped_column(String(300), index=True, nullable=False)
     brand: Mapped[str | None] = mapped_column(String(160), index=True, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    product_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     quantity_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     quantity_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
