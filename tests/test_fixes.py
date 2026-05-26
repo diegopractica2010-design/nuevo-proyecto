@@ -266,5 +266,26 @@ class TestFix4JWTHardening(unittest.TestCase):
         self.assertEqual(me_response.json()["username"], "newuser")
 
 
+class TestStatusDashboard(unittest.TestCase):
+    """Tests for GET /status dashboard."""
+
+    def setUp(self):
+        reset_db()
+        self.client = TestClient(app)
+
+    def test_status_returns_200(self):
+        response = self.client.get("/status")
+        self.assertEqual(response.status_code, 200)
+
+    def test_status_contains_postgresql(self):
+        response = self.client.get("/status")
+        self.assertIn("PostgreSQL", response.text)
+
+    def test_status_is_html(self):
+        response = self.client.get("/status")
+        content_type = response.headers.get("content-type", "")
+        self.assertIn("text/html", content_type)
+
+
 if __name__ == "__main__":
     unittest.main()

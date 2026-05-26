@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from typing import Optional
 
@@ -214,6 +214,12 @@ def health_full():
     checker = get_health_checker()
     check = checker.check_full()
     return check
+
+
+@app.get("/status", include_in_schema=False)
+def status_dashboard():
+    from backend.status_dashboard import get_status_html
+    return HTMLResponse(content=get_status_html())
 
 
 @app.get("/health/scraper", include_in_schema=False)
