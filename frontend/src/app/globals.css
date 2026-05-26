@@ -3,39 +3,54 @@
 @tailwind utilities;
 
 @layer base {
+  /* ── Light mode (default) ──────────────────────────────────── */
   :root {
-    /* Colors - Dark Premium Theme */
+    --background: 0 0% 97%;
+    --foreground: 215 25% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 12%;
+    --primary: 161 85% 26%;          /* #0a7c5c */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 17% 93%;
+    --secondary-foreground: 215 25% 20%;
+    --muted: 210 17% 93%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 17% 90%;
+    --accent-foreground: 215 25% 12%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 161 85% 26%;
+    --radius: 0.5rem;
+    --success: 142 71% 35%;
+    --warning: 38 92% 50%;
+    --info: 210 97% 57%;
+  }
+
+  /* ── Dark mode ─────────────────────────────────────────────── */
+  .dark {
     --background: 222 47% 5%;
     --foreground: 210 40% 98%;
     --card: 222 35% 9%;
     --card-foreground: 210 40% 98%;
-    --primary: 165 86% 55%;
+    --primary: 161 70% 38%;          /* lighter emerald for dark bg */
     --primary-foreground: 222 47% 5%;
     --secondary: 222 24% 16%;
     --secondary-foreground: 210 40% 98%;
     --muted: 222 20% 15%;
-    --muted-foreground: 215 18% 70%;
+    --muted-foreground: 215 18% 65%;
     --accent: 214 90% 64%;
     --accent-foreground: 210 40% 98%;
     --destructive: 0 72% 55%;
     --destructive-foreground: 210 40% 98%;
     --border: 215 18% 20%;
     --input: 215 18% 20%;
-    --ring: 165 86% 55%;
+    --ring: 161 70% 38%;
     --radius: 0.5rem;
-    
-    /* Extended Colors */
     --success: 142 71% 45%;
     --warning: 38 92% 50%;
     --info: 210 97% 57%;
-    
-    /* Shadows */
-    --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-    --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   }
 
   * {
@@ -43,160 +58,59 @@
   }
 
   html {
-    color-scheme: dark;
     scroll-behavior: smooth;
   }
 
   body {
-    @apply min-h-screen bg-background text-foreground;
-    background:
-      linear-gradient(180deg, rgba(45, 212, 191, 0.055), transparent 22rem),
-      linear-gradient(120deg, rgba(96, 165, 250, 0.045), transparent 34rem),
-      hsl(var(--background));
+    @apply min-h-screen bg-background text-foreground antialiased;
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
+  .dark body {
+    background:
+      linear-gradient(180deg, rgba(10, 124, 92, 0.06), transparent 20rem),
+      hsl(var(--background));
+  }
+
   ::selection {
-    @apply bg-primary/30 text-foreground;
+    @apply bg-primary/20 text-foreground;
   }
 }
 
-/* Glass Morphism */
-.glass {
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+/* ── Badge variants ─────────────────────────────────────────── */
+.badge-success {
+  @apply border-emerald-200 bg-emerald-50 text-emerald-700
+         dark:border-emerald-800/40 dark:bg-emerald-900/20 dark:text-emerald-400;
 }
 
-.glass-line {
-  position: relative;
+.badge-warning {
+  @apply border-amber-200 bg-amber-50 text-amber-700
+         dark:border-amber-800/40 dark:bg-amber-900/20 dark:text-amber-400;
 }
 
-.glass-line::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-/* Animations */
+/* ── Animations ─────────────────────────────────────────────── */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-@keyframes slideInUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes slideInDown {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.animate-fade-in  { animation: fadeIn  0.3s ease-out both; }
+.animate-slide-up { animation: slideUp 0.3s ease-out both; }
+
+/* ── Utilities ──────────────────────────────────────────────── */
+.no-scrollbar               { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+.shadow-panel {
+  box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.04);
 }
 
-@keyframes slideInLeft {
-  from {
-    opacity: 0;
-    transform: translateX(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+.dark .shadow-panel {
+  box-shadow: 0 1px 3px rgba(0,0,0,.3), 0 4px 12px rgba(0,0,0,.2);
 }
-
-@keyframes slideInRight {
-  from {
-    opacity: 0;
-    transform: translateX(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: -1000px 0;
-  }
-  100% {
-    background-position: 1000px 0;
-  }
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.3s ease-in-out;
-}
-
-.animate-slide-in-up {
-  animation: slideInUp 0.3s ease-out;
-}
-
-.animate-slide-in-down {
-  animation: slideInDown 0.3s ease-out;
-}
-
-.animate-slide-in-left {
-  animation: slideInLeft 0.3s ease-out;
-}
-
-.animate-slide-in-right {
-  animation: slideInRight 0.3s ease-out;
-}
-
-/* Utility Classes */
-.truncate-lines {
-  display: -webkit-box;
-  -webkit-line-clamp: var(--truncate-lines, 2);
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.text-balance {
-  text-wrap: balance;
-}
-
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-
-/* Premium Blur Effects */
-.blur-glass {
-  backdrop-filter: blur(12px);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-/* Glow Effects */
-.glow {
-  box-shadow: 0 0 20px rgba(45, 212, 191, 0.3);
-}
-
-.glow-accent {
-  box-shadow: 0 0 20px rgba(96, 165, 250, 0.2);
-}
-

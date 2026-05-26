@@ -132,6 +132,33 @@ export interface PriceHistoryResponse {
   trends: PriceHistoryTrends;
 }
 
+export interface BasketItem {
+  product_id: string;
+  name: string;
+  price: number;
+  quantity: number;
+  store: string;
+  added_at?: string;
+}
+
+export interface Basket {
+  id: string;
+  name: string;
+  user_id?: string | null;
+  items: BasketItem[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BasketSummary {
+  id: string;
+  name: string;
+  item_count: number;
+  total_price: number;
+  stores: string[];
+  created_at?: string;
+}
+
 export interface ScraperHealthStore {
   status: "ok" | "degraded" | "down" | string;
   timestamp?: string;

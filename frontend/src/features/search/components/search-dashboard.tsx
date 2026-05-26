@@ -1,139 +1,194 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
-import { motion } from "framer-motion";
-import { Search, Sparkles, TrendingDown } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Coffee, Milk, ShoppingBag, Sparkles, Wheat, Wind,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { useSearchProducts } from "@/hooks/use-search-products";
-import { formatCurrency } from "@/lib/utils";
 import { useAppStore } from "@/stores/use-app-store";
+import { cn } from "@/lib/utils";
 import { ProductGrid } from "./product-grid";
-import { StoreSwitcher } from "./store-switcher";
 
-const quickQueries = ["arroz 1 kilo", "leche entera 1 litro", "aceite 1 litro", "detergente ropa"];
+// ── Rotating placeholder ───────────────────────────────────────────────────
+
+const PLACEHOLDERS = [
+  "leche entera 1 litro…",
+  "arroz 1 kilo…",
+  "detergente ropa…",
+  "yogur frutilla…",
+  "aceite maravilla 1 litro…",
+  "papel higiénico…",
+  "jugo naranja 1 litro…",
+];
+
+function useCyclingPlaceholder(strings: string[], ms = 2600) {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setIndex((i) => (i + 1) % strings.length), ms);
+    return () => clearInterval(id);
+  }, [strings, ms]);
+  return strings[index];
+}
+
+// ── Quick pills ────────────────────────────────────────────────────────────
+
+const PILLS: Array<{ label: string; icon: typeof Milk; q: string }> = [
+  { label: "Leche",       icon: Milk,       q: "leche entera 1 litro" },
+  { label: "Arroz",       icon: Wheat,      q: "arroz 1 kilo" },
+  { label: "Café",        icon: Coffee,     q: "café molido" },
+  { label: "Detergente",  icon: Wind,       q: "detergente ropa" },
+  { label: "Bolsas",      icon: ShoppingBag,q: "bolsas basura" },
+];
+
+// ── Component ──────────────────────────────────────────────────────────────
 
 export function SearchDashboard() {
-  const activeStore = useAppStore((state) => state.activeStore);
-  const setActiveStore = useAppStore((state) => state.setActiveStore);
-  const pushRecentQuery = useAppStore((state) => state.pushRecentQuery);
-  const recentQueries = useAppStore((state) => state.recentQueries);
-  const [draft, setDraft] = useState("arroz 1 kilo");
-  const [query, setQuery] = useState("arroz 1 kilo");
+  const activeStore = useAppStore((s) => s.activeStore);
+  const pushRecentQuery = useAppStore((s) => s.pushRecentQuery);
+  const recentQueries = useAppStore((s) => s.recentQueries);
+
+  const [draft, setDraft] = useState("");
+  const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const placeholder = useCyclingPlaceholder(PLACEHOLDERS);
   const search = useSearchProducts(query, activeStore);
 
-  const cheapest = useMemo(
-    () => search.data?.results.reduce((best, item) => (!best || item.price < best.price ? item : best), search.data.results[0]),
-    [search.data]
-  );
+  function fire(q: string) {
+    const trimmed = q.trim();
+    if (!trimmed) return;
+    setDraft(trimmed);
+    setQuery(trimmed);
+    pushRecentQuery(trimmed);
+  }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const nextQuery = draft.trim();
-    if (!nextQuery) return;
-    setQuery(nextQuery);
-    pushRecentQuery(nextQuery);
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    fire(draft);
   }
 
   return (
-    <section id="search" className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <div className="space-y-6">
-        <Card className="overflow-hidden">
-          <CardHeader className="border-b border-white/10">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-              <div className="max-w-2xl">
-                <Badge variant="secondary" className="mb-3">Live market intelligence</Badge>
-                <CardTitle className="text-3xl font-semibold tracking-normal sm:text-4xl">
-                  Compara precios reales con una experiencia de control ejecutivo.
-                </CardTitle>
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                  Búsqueda live, cache DB, salud de scrapers y comparación por precio unitario en una interfaz rápida.
-                </p>
-              </div>
-              <StoreSwitcher value={activeStore} onChange={setActiveStore} />
-            </div>
-          </CardHeader>
-          <CardContent className="p-5">
-            <form onSubmit={onSubmit} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  className="pl-9"
-                  placeholder="Busca leche, arroz, café, detergente..."
-                />
-              </div>
-              <Button type="submit" size="lg">
-                <Sparkles className="h-4 w-4" />
-                Buscar
-              </Button>
-            </form>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {quickQueries.map((item) => (
-                <Button key={item} type="button" variant="outline" size="sm" onClick={() => { setDraft(item); setQuery(item); pushRecentQuery(item); }}>
-                  {item}
-                </Button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+    <section className="space-y-8">
+      {/* ── Hero ── */}
+      <div className="flex flex-col items-center gap-6 pt-4 text-center">
+        <motion.h1
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl"
+        >
+          ¿Qué vas a comprar hoy?
+        </motion.h1>
 
-        <ProductGrid products={search.data?.results ?? []} isLoading={search.isFetching} />
+        <motion.form
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, delay: 0.06 }}
+          onSubmit={onSubmit}
+          className="relative w-full max-w-xl"
+        >
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={placeholder}
+            className={cn(
+              "h-14 w-full rounded-xl border border-border bg-background px-5 pr-24",
+              "text-[15px] shadow-sm outline-none ring-0",
+              "placeholder:text-muted-foreground/60",
+              "focus:border-primary focus:ring-2 focus:ring-primary/20",
+              "transition-all duration-200"
+            )}
+          />
+          <Button
+            type="submit"
+            size="sm"
+            className="absolute right-2 top-1/2 -translate-y-1/2 gap-1.5 rounded-lg px-4"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Buscar
+          </Button>
+        </motion.form>
+
+        {/* Quick pills */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.12 }}
+          className="flex flex-wrap justify-center gap-2"
+        >
+          {PILLS.map(({ label, icon: Icon, q }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => fire(q)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5",
+                "text-xs font-medium text-muted-foreground",
+                "transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+              )}
+            >
+              <Icon className="h-3 w-3" />
+              {label}
+            </button>
+          ))}
+        </motion.div>
+
+        {/* Recent queries */}
+        <AnimatePresence>
+          {recentQueries.length > 0 && !query && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-wrap justify-center gap-1.5"
+            >
+              <span className="text-xs text-muted-foreground">Recientes:</span>
+              {recentQueries.slice(0, 5).map((q) => (
+                <button
+                  key={q}
+                  onClick={() => fire(q)}
+                  className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  {q}
+                </button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      <aside className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingDown className="h-4 w-4 text-primary" />
-              Market snapshot
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            <Metric label="Resultados" value={String(search.data?.count ?? 0)} />
-            <Metric label="Mejor precio" value={formatCurrency(cheapest?.price)} />
-            <Metric label="Promedio" value={formatCurrency(search.data?.stats.average_price)} />
-            <Metric label="Estrategia" value={search.data?.strategy ?? "waiting"} small />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent demand</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            {recentQueries.map((item) => (
-              <button
-                key={item}
-                className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
-                onClick={() => { setDraft(item); setQuery(item); }}
-              >
-                {item}
-              </button>
-            ))}
-          </CardContent>
-        </Card>
-
-        {search.data?.warning ? (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <Card className="border-amber-300/20 bg-amber-300/8">
-              <CardContent className="p-4 text-sm text-amber-100">{search.data.warning}</CardContent>
-            </Card>
+      {/* ── Results ── */}
+      <AnimatePresence mode="wait">
+        {query && (
+          <motion.div
+            key={query + activeStore}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            {search.data && search.data.count > 0 && (
+              <p className="mb-4 text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{search.data.count}</span> resultados
+                para &ldquo;{query}&rdquo; en{" "}
+                <span className="font-medium capitalize text-foreground">{activeStore}</span>
+                {search.data.strategy ? (
+                  <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-[10px]">
+                    {search.data.strategy}
+                  </span>
+                ) : null}
+              </p>
+            )}
+            <ProductGrid
+              products={search.data?.results ?? []}
+              isLoading={search.isFetching}
+              emptyQuery={query}
+            />
           </motion.div>
-        ) : null}
-      </aside>
+        )}
+      </AnimatePresence>
     </section>
-  );
-}
-
-function Metric({ label, value, small = false }: { label: string; value: string; small?: boolean }) {
-  return (
-    <div className="rounded-md border border-white/10 bg-black/20 p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={small ? "mt-1 truncate text-xs font-medium" : "mt-1 text-xl font-semibold"}>{value}</p>
-    </div>
   );
 }

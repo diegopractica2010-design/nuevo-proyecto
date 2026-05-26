@@ -8,7 +8,7 @@ from pydantic import ConfigDict, field_validator
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    model_config = ConfigDict(env_file=".env", case_sensitive=True)
+    model_config = ConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
     
     # Paths
     BASE_DIR: Path = Path(__file__).resolve().parent.parent

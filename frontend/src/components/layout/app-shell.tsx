@@ -1,137 +1,198 @@
 "use client";
 
-import { BarChart3, Command, LineChart, LogOut, Menu, Radar, Settings, ShoppingBasket, User, X } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import { ScraperHealthPanel } from "@/features/health/components/scraper-health-panel";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { LogOut, Moon, ShoppingCart, Sun } from "lucide-react";
 import { AuthModal } from "@/features/auth/components/auth-modal";
-import { Button } from "@/components/ui/button";
-import { useAppStore } from "@/stores/use-app-store";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { apiClient } from "@/services/api-client";
+import { useAppStore } from "@/stores/use-app-store";
+import type { StoreId, StoreInfo } from "@/types/api";
 
-const navigation = [
-  { label: "Search", icon: Command, href: "#search" },
-  { label: "Compare", icon: ShoppingBasket, href: "#compare" },
-  { label: "Insights", icon: LineChart, href: "#insights" }
+// ── SVG store logos ────────────────────────────────────────────────────────
+
+function LiderLogo({ active }: { active: boolean }) {
+  return (
+    <svg width="32" height="16" viewBox="0 0 32 16" fill="none" aria-hidden>
+      <rect width="32" height="16" rx="3" fill={active ? "#00913f" : "transparent"} />
+      <text x="16" y="12" textAnchor="middle"
+        fill={active ? "#fff" : "#00913f"}
+        fontFamily="system-ui,sans-serif" fontSize="10" fontWeight="700">
+        LIDER
+      </text>
+    </svg>
+  );
+}
+
+function JumboLogo({ active }: { active: boolean }) {
+  return (
+    <svg width="32" height="16" viewBox="0 0 32 16" fill="none" aria-hidden>
+      <rect width="32" height="16" rx="3" fill={active ? "#e5002b" : "transparent"} />
+      <text x="16" y="12" textAnchor="middle"
+        fill={active ? "#fff" : "#e5002b"}
+        fontFamily="system-ui,sans-serif" fontSize="9" fontWeight="700">
+        JUMBO
+      </text>
+    </svg>
+  );
+}
+
+function StoreLogoFor({ id, active }: { id: string; active: boolean }) {
+  if (id === "lider") return <LiderLogo active={active} />;
+  if (id === "jumbo") return <JumboLogo active={active} />;
+  return <span className="text-xs font-semibold uppercase">{id}</span>;
+}
+
+// ── Radar wordmark ─────────────────────────────────────────────────────────
+
+function RadarWordmark() {
+  return (
+    <Link href="/" className="flex items-center gap-2 select-none">
+      <svg className="h-5 w-5 text-primary" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M19.07 4.93A10 10 0 0 0 6.99 3.34" />
+        <path d="M2.29 9.62A10 10 0 1 0 21.31 8.35" />
+        <path d="M16.24 7.76A6 6 0 1 0 8.23 16.67" />
+        <circle cx="12" cy="12" r="2" />
+        <path d="m13.41 10.59 5.66-5.66" />
+      </svg>
+      <span className="text-[15px] font-bold tracking-tight">Radar</span>
+    </Link>
+  );
+}
+
+// ── Theme toggle ───────────────────────────────────────────────────────────
+
+function ThemeToggle() {
+  const [dark, setDark] = useState(false);
+  useEffect(() => {
+    setDark(document.documentElement.classList.contains("dark"));
+  }, []);
+  function toggle() {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.classList.toggle("dark", next);
+    localStorage.setItem("theme", next ? "dark" : "light");
+  }
+  return (
+    <button
+      onClick={toggle}
+      aria-label="Cambiar tema"
+      className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+    >
+      {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+    </button>
+  );
+}
+
+// ── Store tab switcher ─────────────────────────────────────────────────────
+
+const FALLBACK_STORES: StoreInfo[] = [
+  { id: "lider", display_name: "Lider", experimental: false },
+  { id: "jumbo", display_name: "Jumbo", experimental: true },
 ];
 
-const userMenu = [
-  { label: "Profile", icon: User },
-  { label: "Settings", icon: Settings },
-  { label: "Logout", icon: LogOut, variant: "destructive" as const }
-];
-
-export function AppShell({ children }: { children: React.ReactNode }) {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const authUsername = useAppStore((s) => s.authUsername);
-  const logout = useAppStore((s) => s.logout);
+function StoreTabs() {
+  const activeStore = useAppStore((s) => s.activeStore);
+  const setActiveStore = useAppStore((s) => s.setActiveStore);
+  const { data: stores = FALLBACK_STORES } = useQuery({
+    queryKey: ["stores"],
+    queryFn: () => apiClient.getStores(),
+    staleTime: Infinity,
+  });
 
   return (
-    <div className="min-h-screen">
-      {/* Sidebar - Desktop */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-20 border-r border-white/10 bg-black/30 backdrop-blur-xl lg:flex lg:flex-col lg:items-center lg:py-5">
-        <a className="mb-8 flex h-11 w-11 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors" href="#/">
-          <Radar className="h-5 w-5" />
-        </a>
-        <nav className="flex flex-1 flex-col gap-3">
-          {navigation.map((item) => (
-            <a
-              key={item.href}
-              href={item.href}
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-white/8 hover:text-foreground"
-              aria-label={item.label}
-            >
-              <item.icon className="h-5 w-5" />
-            </a>
-          ))}
-        </nav>
-        <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 text-muted-foreground hover:bg-white/8 transition-colors cursor-pointer">
-          <BarChart3 className="h-5 w-5" />
-        </div>
-      </aside>
+    <div className="flex items-center gap-0.5 rounded-lg border border-border bg-muted p-0.5">
+      {stores.map((s) => {
+        const active = activeStore === s.id;
+        return (
+          <button
+            key={s.id}
+            onClick={() => setActiveStore(s.id as StoreId)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-200",
+              active
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <StoreLogoFor id={s.id} active={active} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
-      {/* Main Content */}
-      <main className="lg:pl-20">
-        {/* Header */}
-        <header className="sticky top-0 z-30 border-b border-white/10 bg-background/78 backdrop-blur-xl">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground lg:hidden">
-                <Radar className="h-5 w-5" />
-              </div>
-              <div className="min-w-0 hidden sm:block">
-                <p className="text-sm font-semibold">Radar de Precios</p>
-                <p className="truncate text-xs text-muted-foreground">Enterprise grocery intelligence</p>
-              </div>
-            </div>
+// ── Shell ──────────────────────────────────────────────────────────────────
 
-            <div className="flex items-center gap-4 ml-auto">
-              <div className="hidden md:flex">
-                <ScraperHealthPanel compact />
-              </div>
+export function AppShell({ children }: { children: React.ReactNode }) {
+  const authUsername = useAppStore((s) => s.authUsername);
+  const logout = useAppStore((s) => s.logout);
+  const cartCount = useAppStore((s) => s.cartCount);
 
-              {/* Auth */}
-              {authUsername ? (
-                <div className="flex items-center gap-2">
-                  <span className="hidden sm:flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <User className="h-3.5 w-3.5" />
-                    {authUsername}
-                  </span>
-                  <Button variant="ghost" size="sm" onClick={logout} aria-label="Logout">
-                    <LogOut className="h-4 w-4" />
-                  </Button>
-                </div>
-              ) : (
-                <AuthModal />
-              )}
+  return (
+    <div className="flex min-h-screen flex-col">
+      {/* ── Header ── */}
+      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/90 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3 sm:px-6">
+          <RadarWordmark />
 
-              {/* Mobile Menu Button */}
-              <button
-                className="lg:hidden p-2 hover:bg-white/8 rounded-lg transition-colors"
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              >
-                {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-              </button>
-            </div>
+          <div className="flex flex-1 justify-center">
+            <StoreTabs />
           </div>
 
-          {/* Mobile Menu */}
-          <AnimatePresence>
-            {mobileMenuOpen && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="border-t border-white/10 bg-black/30 backdrop-blur-xl lg:hidden"
-              >
-                <nav className="flex gap-2 p-4">
-                  {navigation.map((item) => (
-                    <a
-                      key={item.href}
-                      href={item.href}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-white/8 hover:text-foreground transition"
-                      onClick={() => setMobileMenuOpen(false)}
-                    >
-                      <item.icon className="h-4 w-4" />
-                      {item.label}
-                    </a>
-                  ))}
-                </nav>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </header>
+          <div className="flex items-center gap-1.5">
+            <ThemeToggle />
 
-        {/* Content */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, ease: "easeOut" }}
-          className={cn("mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8")}
-        >
-          {children}
-        </motion.div>
+            {cartCount > 0 && (
+              <Link
+                href="/baskets"
+                className="relative flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <ShoppingCart className="h-4 w-4" />
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
+                  {cartCount > 9 ? "9+" : cartCount}
+                </span>
+              </Link>
+            )}
+
+            {authUsername ? (
+              <div className="flex items-center gap-2">
+                <span className="hidden max-w-[100px] truncate text-xs text-muted-foreground sm:inline">
+                  {authUsername}
+                </span>
+                <button
+                  onClick={logout}
+                  aria-label="Cerrar sesión"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <AuthModal
+                trigger={
+                  <button className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent">
+                    Ingresar
+                  </button>
+                }
+              />
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* ── Content ── */}
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6">
+        {children}
       </main>
+
+      {/* ── Footer ── */}
+      <footer className="border-t border-border/60 py-5 text-center text-xs text-muted-foreground">
+        Radar de Precios · Santiago, Chile · Precios actualizados en tiempo real
+      </footer>
     </div>
   );
 }

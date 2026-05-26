@@ -1,4 +1,4 @@
-import type { AuthToken, CompareResponse, PriceHistoryResponse, ScraperHealthResponse, SearchResponse, StoreId, StoreInfo, UserLoginRequest, UserRegisterRequest, UserResponse } from "@/types/api";
+import type { AuthToken, Basket, BasketSummary, CompareResponse, PriceHistoryResponse, ScraperHealthResponse, SearchResponse, StoreId, StoreInfo, UserLoginRequest, UserRegisterRequest, UserResponse } from "@/types/api";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
@@ -76,5 +76,34 @@ export const apiClient = {
 
   getStores() {
     return request<StoreInfo[]>("/stores");
-  }
+  },
+
+  getBaskets() {
+    return request<BasketSummary[]>("/baskets");
+  },
+
+  getBasket(basketId: string) {
+    return request<Basket>(`/baskets/${basketId}`);
+  },
+
+  createBasket(name: string) {
+    return request<Basket>("/baskets", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  },
+
+  addToBasket(basketId: string, product: Record<string, unknown>, quantity = 1) {
+    return request<{ message: string }>(`/baskets/${basketId}/items`, {
+      method: "POST",
+      body: JSON.stringify({ product, quantity }),
+    });
+  },
+
+  updateBasketItem(basketId: string, productId: string, quantity: number) {
+    return request<{ message: string }>(`/baskets/${basketId}/items/${productId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ quantity }),
+    });
+  },
 };
