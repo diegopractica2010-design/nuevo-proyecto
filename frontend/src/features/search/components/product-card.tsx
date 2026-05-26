@@ -18,7 +18,7 @@ export function ProductCard({ product, index }: { product: Product; index: numbe
   const productId = product.sku ?? product.id ?? `${product.source}-${product.name}`;
   const isFavorite = favoriteProductIds.includes(productId);
   const [showHistory, setShowHistory] = useState(false);
-  const storeId = (product.source === "lider" || product.source === "jumbo") ? product.source as StoreId : null;
+  const storeId: StoreId | null = product.source || null;
 
   return (
     <motion.div

@@ -1,4 +1,4 @@
-import type { AuthToken, CompareResponse, PriceHistoryResponse, ScraperHealthResponse, SearchResponse, StoreId, UserLoginRequest, UserRegisterRequest, UserResponse } from "@/types/api";
+import type { AuthToken, CompareResponse, PriceHistoryResponse, ScraperHealthResponse, SearchResponse, StoreId, StoreInfo, UserLoginRequest, UserRegisterRequest, UserResponse } from "@/types/api";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
@@ -72,5 +72,9 @@ export const apiClient = {
   getPriceHistory(product_id: string, store: StoreId) {
     const params = new URLSearchParams({ store });
     return request<PriceHistoryResponse>(`/price-history/${encodeURIComponent(product_id)}?${params.toString()}`);
+  },
+
+  getStores() {
+    return request<StoreInfo[]>("/stores");
   }
 };

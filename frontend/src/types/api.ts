@@ -1,4 +1,10 @@
-export type StoreId = "lider" | "jumbo";
+export type StoreId = string;
+
+export interface StoreInfo {
+  id: string;
+  display_name: string;
+  experimental: boolean;
+}
 
 export interface Product {
   id?: string | null;
