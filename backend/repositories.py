@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.db_models import BasketItemRecord, BasketRecord, PriceHistoryRecord, UserRecord
@@ -18,6 +18,11 @@ class UserRepository:
 
     def get_by_email(self, email: str) -> Optional[UserRecord]:
         return self.session.scalar(select(UserRecord).where(UserRecord.email == email))
+
+    def count_admins(self) -> int:
+        return self.session.scalar(
+            select(func.count()).select_from(UserRecord).where(UserRecord.role == "admin")
+        ) or 0
 
     def create(self, username: str, email: str, hashed_password: str) -> UserRecord:
         user = UserRecord(

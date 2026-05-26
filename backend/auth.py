@@ -6,6 +6,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Optional
 
+from fastapi import Header, HTTPException
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
@@ -46,6 +47,21 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def require_admin(authorization: Optional[str] = Header(None, description="Bearer JWT")) -> str:
+    """FastAPI dependency — raises 403 if the authenticated user is not an admin."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+    username = TokenService.verify_token(authorization[7:])
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = AuthService.get_user(username)
+    if not user or user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return username
 
 
 class AuthService:

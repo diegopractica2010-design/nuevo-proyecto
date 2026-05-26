@@ -2,7 +2,7 @@ import logging
 import signal
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from fastapi import Body, FastAPI, Header, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -25,7 +25,7 @@ from backend.search_service import SearchServiceError, search_products
 from backend.compliance import ComplianceError
 from backend.basket_service import BasketService, PriceHistoryService
 from backend.models_baskets import Basket, BasketSummary
-from backend.auth import AuthService, TokenService
+from backend.auth import AuthService, TokenService, require_admin
 from backend.models_auth import Token, UserCreate, UserLogin, UserResponse
 
 # FASE 4: Import new modules
@@ -562,13 +562,8 @@ def metrics():
 # FASE 4: Backup Management Endpoints
 # ============================================================================
 @app.post("/admin/backup", include_in_schema=False)
-def trigger_backup(authorization: Optional[str] = Header(None)):
+def trigger_backup(username: str = Depends(require_admin)):
     """Manually trigger database backup (FASE 4 - Admin only)."""
-    # In production, verify admin token
-    username = _username_from_authorization(authorization)
-    if not username:  # Simple admin check - use proper RBAC in production
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
     try:
         logger.info(f"Backup triggered by {username}")
         manager = BackupManager()
@@ -593,12 +588,8 @@ def trigger_backup(authorization: Optional[str] = Header(None)):
 
 
 @app.get("/admin/backup-status", include_in_schema=False)
-def backup_status(authorization: Optional[str] = Header(None)):
+def backup_status(username: str = Depends(require_admin)):
     """Get backup status and list (FASE 4 - Admin only)."""
-    username = _username_from_authorization(authorization)
-    if not username:
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
     try:
         from pathlib import Path
         backup_path = Path("./data/backups")
@@ -623,6 +614,25 @@ def backup_status(authorization: Optional[str] = Header(None)):
     except Exception as e:
         logger.error(f"Failed to get backup status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/admin/promote", include_in_schema=False)
+def promote_user(username: str = Query(..., description="Username to promote to admin")):
+    """Bootstrap endpoint: promote a user to admin. Only works when no admins exist."""
+    from backend.db import SessionLocal
+    from backend.repositories import UserRepository
+    with SessionLocal() as session:
+        repo = UserRepository(session)
+        admin_count = repo.count_admins()
+        if admin_count > 0:
+            raise HTTPException(status_code=403, detail="Bootstrap endpoint disabled: admins already exist")
+        user = repo.get_by_username(username)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        user.role = "admin"
+        session.commit()
+    logger.info(f"User '{username}' promoted to admin via bootstrap endpoint")
+    return {"status": "success", "username": username, "role": "admin"}
 
 
 # ============================================================================
