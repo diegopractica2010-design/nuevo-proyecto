@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from fastapi import Body, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from typing import Optional
 
@@ -535,7 +535,7 @@ def metrics():
         raise HTTPException(status_code=404, detail="Metrics disabled")
     
     metrics_data, content_type = get_metrics_response()
-    return metrics_data
+    return Response(content=metrics_data, media_type=content_type)
 
 
 # ============================================================================
