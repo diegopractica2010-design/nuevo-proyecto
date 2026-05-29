@@ -9,8 +9,7 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.models import Product, SearchResponse
-from backend.scraper import ScrapedSearchResult as LiderScrapedSearchResult
-from backend.scraper_jumbo import ScrapedSearchResult as JumboScrapedSearchResult
+from backend.scraper import ScrapedSearchResult
 
 
 client = TestClient(app)
@@ -96,7 +95,7 @@ def test_scraper_health_canonical_queries_succeed(monkeypatch, tmp_path):
     monkeypatch.setattr(parser_monitor, "PRODUCT_SNAPSHOT_DIR", tmp_path / "snapshots")
     monkeypatch.setattr(parser_monitor, "STATE_FILE", tmp_path / "parser_snapshots" / "parser_state.json")
 
-    lider = LiderScrapedSearchResult(
+    lider = ScrapedSearchResult(
         query="arroz",
         applied_query="arroz",
         products=[{"name": "Arroz Lider 1 kg", "price": 1500, "source": "lider"}],
@@ -104,7 +103,7 @@ def test_scraper_health_canonical_queries_succeed(monkeypatch, tmp_path):
         fetch_strategy="search:browser",
         parse_strategy="next_data",
     )
-    jumbo = JumboScrapedSearchResult(
+    jumbo = ScrapedSearchResult(
         query="arroz",
         applied_query="arroz",
         products=[{"name": "Arroz Jumbo 1 kg", "price": 1600, "source": "jumbo"}],

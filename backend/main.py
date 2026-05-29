@@ -243,6 +243,7 @@ def get_stores():
 
 
 @app.get("/search", response_model=SearchResponse)
+@app.post("/search", response_model=SearchResponse)
 async def search(
     background: BackgroundTasks,
     query: Optional[str] = Query(None, min_length=1, description="Nombre del producto"),
@@ -408,6 +409,7 @@ def get_price_history(
 
     history = PriceHistoryService.get_price_history(product_id, store)
     trends = PriceHistoryService.get_price_trends(product_id, store, days=days)
+
     return {
         "product_id": product_id,
         "store": store,
@@ -438,6 +440,15 @@ def _get_canonical_price_history(canonical_key: str, store: str, days: int) -> d
         records = list(session.scalars(statement).all())
 
     values = [float(record.value) for record in records]
+    trend = "stable"
+    if len(values) >= 2:
+        first_price = values[0]
+        last_price = values[-1]
+        if last_price < first_price * 0.95:
+            trend = "decreasing"
+        elif last_price > first_price * 1.05:
+            trend = "increasing"
+
     return {
         "canonical_key": canonical_key,
         "store": store,
@@ -453,7 +464,7 @@ def _get_canonical_price_history(canonical_key: str, store: str, days: int) -> d
             "current_price": values[-1] if values else None,
             "min_price": min(values) if values else None,
             "max_price": max(values) if values else None,
-            "trend": "stable",
+            "trend": trend,
             "history_count": len(values),
         },
     }

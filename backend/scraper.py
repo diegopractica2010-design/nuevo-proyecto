@@ -25,14 +25,29 @@ class ScraperError(RuntimeError):
 
 class NoResultsError(ScraperError):
     """Raised when a scraper query returns no results."""
-    def __init__(self, query: str, *, attempts: list[str] | None = None, suggestions: list[str] | None = None):
-        super().__init__(f'No se encontraron productos para "{query}"')
+    def __init__(
+        self,
+        query: str,
+        *,
+        attempts: list[str] | None = None,
+        suggestions: list[str] | None = None,
+        message: str | None = None,
+    ):
+        super().__init__(message or f'No se encontraron productos para "{query}"')
         self.query = query
         self.attempts = attempts or []
         self.suggestions = suggestions or []
 
 
 # Dataclasses
+@dataclass(slots=True)
+class SearchPage:
+    query: str
+    html: str
+    url: str
+    strategy: str
+
+
 @dataclass(slots=True)
 class ScrapedSearchResult:
     """Result of a scraper search operation."""

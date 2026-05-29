@@ -47,7 +47,6 @@ class RateLimiter:
             logger.info("Rate limiter connected to Redis")
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}. Rate limiting DISABLED.")
-            self.redis_client = None
     
     def _get_client_key(self, client_id: str) -> str:
         """Generate Redis key for client."""

@@ -23,6 +23,7 @@ FUTURE CONSOLIDATION (Optional):
 from __future__ import annotations
 
 from alembic import op
+import sqlalchemy as sa
 
 
 revision = "20260528_0004"
@@ -33,12 +34,12 @@ depends_on = None
 
 def upgrade() -> None:
     """
-    No schema changes. All tables remain in current state.
-    This migration documents the consolidation of ORM layers.
+    Bring the migrated schema in line with the consolidated ProductRecord model.
     """
-    pass
+    op.add_column("products", sa.Column("image_url", sa.String(length=1000), nullable=True))
+    op.add_column("products", sa.Column("product_url", sa.String(length=1000), nullable=True))
 
 
 def downgrade() -> None:
-    """No schema changes to revert."""
-    pass
+    op.drop_column("products", "product_url")
+    op.drop_column("products", "image_url")

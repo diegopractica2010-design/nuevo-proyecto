@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote_plus, urljoin
 
@@ -17,7 +16,14 @@ from backend.config import (
 )
 from backend.compliance import assert_live_store_access_allowed
 from backend.parser import parse_catalog_page, parse_price_text
-from backend.scraper import NoResultsError, fallback_query_variants, normalize_query, rank_products_for_query
+from backend.scraper import (
+    NoResultsError,
+    ScrapedSearchResult,
+    SearchPage,
+    fallback_query_variants,
+    normalize_query,
+    rank_products_for_query,
+)
 
 
 JUMBO_CATALOG_API_URL = "https://sm-web-api.ecomm.cencosud.com/catalog/api/v2/products/search/"
@@ -31,24 +37,6 @@ if not JUMBO_API_KEY:
         "Set JUMBO_API_KEY environment variable to enable catalog API search for Jumbo."
     )
 
-
-
-@dataclass(slots=True)
-class SearchPage:
-    query: str
-    html: str
-    url: str
-    strategy: str
-
-
-@dataclass(slots=True)
-class ScrapedSearchResult:
-    query: str
-    applied_query: str
-    products: list[dict]
-    source_url: str
-    fetch_strategy: str = "search:browser"
-    parse_strategy: str = "next_data"
 
 
 def _create_client() -> httpx.AsyncClient:
@@ -111,7 +99,8 @@ async def _execute_catalog_api_query(
     if not JUMBO_API_KEY:
         raise NoResultsError(
             query,
-            attempts=["catalog_api: JUMBO_API_KEY not configured - catalog API search disabled"]
+            attempts=["catalog_api: JUMBO_API_KEY not configured - catalog API search disabled"],
+            message="JUMBO_API_KEY not configured - catalog API search disabled",
         )
     
     headers = {

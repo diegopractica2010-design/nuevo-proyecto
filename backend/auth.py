@@ -5,6 +5,7 @@ import secrets
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import Header, HTTPException
 from jose import JWTError, jwt
@@ -107,7 +108,7 @@ class TokenService:
             expire = datetime.now(UTC) + expires_delta
         else:
             expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        to_encode.update({"exp": expire})
+        to_encode.update({"exp": expire, "iat": datetime.now(UTC), "jti": uuid4().hex})
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt
 
