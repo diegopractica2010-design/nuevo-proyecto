@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from backend.db_models import BasketItemRecord, BasketRecord, PriceHistoryRecord, UserRecord
+from backend.infrastructure.db.models import BasketItemRecord, BasketRecord, PriceHistoryRecord, UserRecord
 
 
 class UserRepository:

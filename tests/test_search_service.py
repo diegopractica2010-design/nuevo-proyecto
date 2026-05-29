@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import Mock, patch
 
@@ -29,7 +30,7 @@ class SearchServiceTests(unittest.TestCase):
         )
         mock_get_store_adapter.return_value = adapter
 
-        response = search_products("leche", limit=24)
+        response = asyncio.run(search_products("leche", limit=24))
 
         self.assertEqual(response.query, "leche")
         self.assertEqual(response.applied_query, "leche")

@@ -2,7 +2,7 @@ import logging
 import signal
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -21,8 +21,7 @@ from backend.middleware import RateLimitMiddleware, RequestIdMiddleware, Logging
 from backend.celery_app import init_celery
 from backend.health_check import get_health_checker
 from backend.models import SearchResponse
-from backend.search_service import SearchServiceError, search_products
-from backend.compliance import ComplianceError
+from backend.search_service import SearchServiceError, _persist_prices, search_products
 from backend.basket_service import BasketService, PriceHistoryService
 from backend.models_baskets import Basket, BasketSummary
 from backend.auth import AuthService, TokenService, require_admin
@@ -244,7 +243,8 @@ def get_stores():
 
 
 @app.get("/search", response_model=SearchResponse)
-def search(
+async def search(
+    background: BackgroundTasks,
     query: Optional[str] = Query(None, min_length=1, description="Nombre del producto"),
     q: Optional[str] = Query(None, min_length=1, description="Alias compatible para query"),
     limit: int = Query(100, ge=1, le=MAX_RESULTS, description="Cantidad máxima de resultados"),
@@ -256,7 +256,14 @@ def search(
 
     logger.info(f"Search request: query='{search_query}', limit={limit}, store='{store}'")
     try:
-        result = search_products(query=search_query, limit=limit, store=store)
+        result = await search_products(query=search_query, limit=limit, store=store)
+        if (
+            isinstance(result, SearchResponse)
+            and result.results
+            and not result.cached
+            and not (result.strategy or "").startswith("db")
+        ):
+            background.add_task(_persist_prices, result.results, (store or "lider").strip().lower())
         logger.info(f"Search completed: found {_result_count(result)} products from {store}")
         return result
     except SearchServiceError as exc:
@@ -264,27 +271,8 @@ def search(
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
-@app.get("/catalog/index", include_in_schema=False)
-def catalog_index(
-    store: str = Query("lider", description="Tienda a indexar: lider, jumbo"),
-    max_products: int = Query(1000, ge=1, le=10000, description="Maximo de productos a devolver"),
-):
-    """Indexa un inventario amplio paginando resultados reales de la tienda."""
-    from backend.catalog_indexer import index_store_catalog
-
-    try:
-        return index_store_catalog(store, max_products=max_products).to_dict()
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except ComplianceError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.error("Catalog index error for %s: %s", store, exc)
-        raise HTTPException(status_code=502, detail="No se pudo indexar el catalogo") from exc
-
-
 @app.post("/shopping-list/compare")
-def compare_shopping_list_endpoint(payload: dict = Body(...)):
+async def compare_shopping_list_endpoint(payload: dict = Body(...)):
     from backend.shopping_list_service import compare_shopping_list, parse_shopping_items
 
     raw_items = payload.get("items") if isinstance(payload, dict) else None
@@ -298,7 +286,7 @@ def compare_shopping_list_endpoint(payload: dict = Body(...)):
         raise HTTPException(status_code=422, detail="La lista puede tener hasta 40 productos")
 
     try:
-        return compare_shopping_list(items)
+        return await compare_shopping_list(items)
     except Exception as exc:
         logger.error("Shopping list compare error: %s", exc, exc_info=True)
         raise HTTPException(status_code=502, detail="No se pudo comparar la lista") from exc

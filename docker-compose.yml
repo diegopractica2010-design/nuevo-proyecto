@@ -127,7 +127,7 @@ services:
         condition: service_healthy
       db:
         condition: service_healthy
-    command: python -m celery -A backend.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    command: python -m celery -A backend.celery_app beat --loglevel=info --schedule=/app/data/celerybeat-schedule
     networks:
       - radar-network
     healthcheck:

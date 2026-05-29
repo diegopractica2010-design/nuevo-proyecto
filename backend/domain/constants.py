@@ -1,0 +1,42 @@
+QUERY_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "barata",
+        "barato",
+        "bolsa",
+        "con",
+        "de",
+        "del",
+        "el",
+        "en",
+        "fideo",
+        "fideos",
+        "la",
+        "las",
+        "los",
+        "mas",
+        "o",
+        "opcion",
+        "pack",
+        "paquete",
+        "para",
+        "por",
+        "saco",
+        "un",
+        "una",
+        "unas",
+        "unos",
+        "y",
+    }
+)
+
+CHARCOAL_TERMS: frozenset[str] = frozenset(
+    {
+        "briqueta",
+        "briquetas",
+        "espino",
+        "parrilla",
+        "quebracho",
+        "quincho",
+        "vegetal",
+    }
+)

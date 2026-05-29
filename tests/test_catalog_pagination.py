@@ -1,6 +1,8 @@
+import asyncio
 from unittest.mock import patch
 
-from backend.scraper import ScrapedSearchResult, _execute_catalog_query
+from backend.infrastructure.scrapers.lider import LiderScraper
+from backend.scraper import ScrapedSearchResult
 from backend.scraper_jumbo import _execute_catalog_api_query
 
 
@@ -16,7 +18,7 @@ def _page(products, page):
 
 
 def test_lider_search_paginates_until_limit_and_deduplicates():
-    with patch("backend.scraper._fetch_catalog_page") as fetch_page:
+    with patch("backend.infrastructure.scrapers.lider.LiderScraper._fetch_catalog_page") as fetch_page:
         fetch_page.side_effect = [
             _page(
                 [
@@ -34,7 +36,7 @@ def test_lider_search_paginates_until_limit_and_deduplicates():
             ),
         ]
 
-        result = _execute_catalog_query("leche", limit=3)
+        result = asyncio.run(LiderScraper()._execute_catalog_query("leche", limit=3))
 
     assert [product["sku"] for product in result.products] == ["1", "2", "3"]
     assert fetch_page.call_count == 2
@@ -56,7 +58,15 @@ class _FakeSession:
     def __init__(self):
         self.calls = []
 
-    def get(self, url, params, headers, timeout):
+    def build_request(self, method, url, params):
+        class Request:
+            def __init__(self, request_url):
+                self.url = request_url
+
+        query = "&".join(f"{key}={value}" for key, value in params.items())
+        return Request(f"{url}?{query}")
+
+    async def get(self, url, params, headers, timeout):
         self.calls.append(params["page"])
         page = params["page"]
         products_by_page = {
@@ -82,7 +92,7 @@ def test_jumbo_api_search_paginates_until_limit():
     session = _FakeSession()
 
     with patch("backend.scraper_jumbo.assert_live_store_access_allowed"):
-        result = _execute_catalog_api_query(session, "arroz", limit=2)
+        result = asyncio.run(_execute_catalog_api_query(session, "arroz", limit=2))
 
     assert [product["sku"] for product in result.products] == ["sku-1", "sku-2"]
     assert session.calls == [1, 2]

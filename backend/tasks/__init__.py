@@ -6,6 +6,7 @@ Legacy task imports are kept here so existing code can continue using
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 
@@ -31,7 +32,7 @@ __all__ = [
 @celery_app.task(bind=True, max_retries=3, name="backend.tasks.search_jumbo_async")
 def search_jumbo_async(self, query: str, limit: int = 36) -> dict:
     try:
-        result = search_jumbo(query=query, limit=limit)
+        result = asyncio.run(search_jumbo(query=query, limit=limit))
         return {
             "status": "success",
             "query": result.query,

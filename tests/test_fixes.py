@@ -1,5 +1,6 @@
 """Tests for Fixes 1-4: API KEY, METRICS, RATE LIMITING, JWT HARDENING."""
 
+import asyncio
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -25,17 +26,14 @@ class TestFix1JumboAPIKey(unittest.TestCase):
                         "JUMBO_CATALOG_API_KEY should not be hardcoded anymore")
     
     @patch('backend.scraper_jumbo.JUMBO_API_KEY', "")
-    @patch('backend.scraper_jumbo._session_get')
+    @patch('backend.scraper_jumbo._client_get')
     def test_jumbo_search_gracefully_handles_missing_api_key(self, mock_get):
         """Test that Jumbo search fails gracefully when API_KEY is empty."""
         from backend.scraper_jumbo import _execute_catalog_api_query
-        import requests
-        
-        session = requests.Session()
         
         # Should raise NoResultsError with specific message about missing API key
         with self.assertRaises(NoResultsError) as ctx:
-            _execute_catalog_api_query(session, "leche", limit=10)
+            asyncio.run(_execute_catalog_api_query(object(), "leche", limit=10))
         
         self.assertIn("JUMBO_API_KEY not configured", str(ctx.exception))
     

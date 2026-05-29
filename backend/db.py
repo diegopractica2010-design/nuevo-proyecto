@@ -23,14 +23,12 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
 def init_db() -> None:
-    from backend import db_models  # noqa: F401
     from backend.infrastructure.db import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 
 
 def reset_db() -> None:
-    from backend import db_models  # noqa: F401
     from backend.infrastructure.db import models  # noqa: F401
 
     Base.metadata.drop_all(bind=engine)

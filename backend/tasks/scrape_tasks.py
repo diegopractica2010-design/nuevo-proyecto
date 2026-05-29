@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 
 from backend.db import SessionLocal
+from backend.domain.normalization.matching import canonicalize
 from backend.domain.price import Price
 from backend.infrastructure.db.models import StoreRecord
 from backend.infrastructure.db.repositories import PriceRepo, ProductRepo
@@ -19,7 +21,7 @@ logger = logging.getLogger(__name__)
 @celery_app.task(bind=True, max_retries=3, name="backend.tasks.scrape_lider")
 def scrape_lider(self, query: str, limit: int = 100) -> dict:
     try:
-        scraped_products = LiderScraper().search(query, limit=limit)
+        search_result = asyncio.run(LiderScraper().search(query, limit=limit))
         inserted_prices = 0
 
         with SessionLocal() as session:
@@ -27,28 +29,40 @@ def scrape_lider(self, query: str, limit: int = 100) -> dict:
             product_repo = ProductRepo(session)
             price_repo = PriceRepo(session)
 
-            for scraped in scraped_products:
+            # Iterar sobre productos en la búsqueda
+            for product_dict in search_result.products:
+                name = "<unknown>"
                 try:
-                    product = product_repo.upsert(scraped.product)
+                    # Los productos retornados por parse_catalog_page tienen estructura dict
+                    # Necesitamos extraer nombre y precio
+                    name = product_dict.get("name") or product_dict.get("title")
+                    price_value = product_dict.get("price") or product_dict.get("value")
+
+                    if not name or price_value is None:
+                        continue
+
+                    # Canonicalizar el producto
+                    product = product_repo.upsert(canonicalize(name))
                     session.flush()
+
                     price_repo.insert(
                         Price(
                             product_key=product.canonical_key,
                             store_id=str(store.id),
-                            value=scraped.price,
+                            value=float(price_value),
                             observed_at=datetime.now(UTC),
                         )
                     )
                     inserted_prices += 1
                 except Exception as exc:
-                    logger.warning("Skipping scraped product %s: %s", scraped.name, exc)
+                    logger.warning("Skipping scraped product %s: %s", name, exc)
 
             session.commit()
 
         return {
             "status": "success",
             "query": query,
-            "products": len(scraped_products),
+            "products": len(search_result.products),
             "prices_inserted": inserted_prices,
         }
     except Exception as exc:

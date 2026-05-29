@@ -1,12 +1,14 @@
+import asyncio
 import unittest
 from unittest.mock import patch
 
-from backend.scraper import NoResultsError, ScrapedSearchResult, search_lider
+from backend.infrastructure.scrapers.lider import LiderScraper
+from backend.scraper import NoResultsError, ScrapedSearchResult
 
 
 class ScraperTests(unittest.TestCase):
-    @patch("backend.scraper.fetch_autocomplete_terms")
-    @patch("backend.scraper._execute_catalog_query")
+    @patch("backend.infrastructure.scrapers.lider.LiderScraper._fetch_autocomplete_terms")
+    @patch("backend.infrastructure.scrapers.lider.LiderScraper._execute_catalog_query")
     def test_search_lider_uses_suggestion_when_direct_query_has_no_results(
         self,
         mock_execute_catalog_query,
@@ -30,7 +32,7 @@ class ScraperTests(unittest.TestCase):
             ),
         ]
 
-        result = search_lider("lech", limit=24)
+        result = asyncio.run(LiderScraper().search("lech", limit=24))
 
         self.assertEqual(result.applied_query, "leche")
         self.assertEqual(result.suggestions, ["lech", "leche", "leche descremada"])

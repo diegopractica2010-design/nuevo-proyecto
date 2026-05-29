@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -22,7 +22,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.headers["content-type"])
 
-    @patch("backend.main.search_products")
+    @patch("backend.main.search_products", new_callable=AsyncMock)
     def test_search_endpoint_success(self, mock_search):
         mock_search.return_value = {
             "query": "leche",
@@ -63,7 +63,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(data["query"], "leche")
         self.assertEqual(len(data["results"]), 1)
 
-    @patch("backend.main.search_products")
+    @patch("backend.main.search_products", new_callable=AsyncMock)
     def test_search_endpoint_accepts_q_alias(self, mock_search):
         mock_search.return_value = {
             "query": "leche",

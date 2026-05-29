@@ -1,45 +1,20 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
-from unicodedata import normalize as unicode_normalize
 
+from backend.domain.constants import CHARCOAL_TERMS, QUERY_STOPWORDS
 from backend.domain.normalization.matching import canonicalize
+from backend.domain.normalization.text import normalize_text
 from backend.application.use_cases.normalize_product import find_competitor_price
 from backend.search_service import search_products
 
 
 from backend.store_adapters import STORE_ADAPTERS
 COMPARE_STORES = tuple(STORE_ADAPTERS.keys())
-
-STOPWORDS = {
-    "de",
-    "del",
-    "la",
-    "las",
-    "el",
-    "los",
-    "un",
-    "una",
-    "en",
-    "para",
-    "por",
-    "con",
-    "y",
-    "o",
-    "mas",
-    "barato",
-    "barata",
-    "opcion",
-    "saco",
-    "bolsa",
-    "paquete",
-    "pack",
-    "fideo",
-    "fideos",
-}
 
 UNIT_WORDS = {
     "kg",
@@ -60,7 +35,10 @@ UNIT_WORDS = {
     "cc",
 }
 
-CHARCOAL_TERMS = {"briqueta", "briquetas", "vegetal", "quincho", "quebracho", "espino", "parrilla"}
+async def _maybe_await(value):
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 @dataclass(slots=True)
@@ -70,9 +48,8 @@ class ShoppingListItem:
 
 
 def normalize_compare_text(value: Any) -> str:
-    text = unicode_normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
-    text = text.lower().replace("yoghurt", "yogurt")
-    text = re.sub(r"[^a-z0-9]+", " ", text)
+    text = normalize_text(str(value or "")).replace("yoghurt", "yogurt")
+    text = re.sub(r"[.,]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -90,7 +67,7 @@ def _query_tokens(query: str) -> list[str]:
     return [
         _canonical_token(token)
         for token in tokens
-        if token not in STOPWORDS
+        if token not in QUERY_STOPWORDS
         and token not in UNIT_WORDS
         and not token.isdigit()
         and len(token) > 1
@@ -294,13 +271,13 @@ def is_specific_query(query: str) -> bool:
     return bool(_unit_requirement(query)) or len(tokens) >= 2
 
 
-def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int = 24) -> dict[str, Any]:
+async def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int = 24) -> dict[str, Any]:
     indexed_items = list(enumerate(items))
     results_by_item: dict[int, list[dict[str, Any]]] = {index: [] for index, _ in indexed_items}
 
-    def compare_store(index: int, item: ShoppingListItem, store: str) -> tuple[int, dict[str, Any]]:
+    async def compare_store(index: int, item: ShoppingListItem, store: str) -> tuple[int, dict[str, Any]]:
         try:
-            response = search_products(item.query, limit=limit_per_store, store=store)
+            response = await _maybe_await(search_products(item.query, limit=limit_per_store, store=store))
             products = [_product_to_dict(product) for product in response.results]
             best_options = select_best_products(products, item.query)
             best_options = [_ensure_unit_price(product) for product in best_options]
@@ -326,15 +303,15 @@ def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int
                 "error": str(exc),
             }
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = [
-            executor.submit(compare_store, index, item, store)
+    store_results = await asyncio.gather(
+        *(
+            compare_store(index, item, store)
             for index, item in indexed_items
             for store in COMPARE_STORES
-        ]
-        for future in as_completed(futures):
-            index, store_result = future.result()
-            results_by_item[index].append(store_result)
+        )
+    )
+    for index, store_result in store_results:
+        results_by_item[index].append(store_result)
 
     compared_items: list[dict[str, Any]] = []
     for index, item in indexed_items:

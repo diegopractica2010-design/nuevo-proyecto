@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-import time
 from dataclasses import dataclass, field
 from typing import Mapping
 
-import requests
+import httpx
+
+from backend.config import REQUEST_TIMEOUT, STORE_SSL_VERIFY
 
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,7 @@ class ScraperRequestError(RuntimeError):
 
 @dataclass
 class BaseScraper:
-    timeout: float = 15.0
+    timeout: float = REQUEST_TIMEOUT
     delay_seconds: float = 0.5
     max_retries: int = 3
     backoff_seconds: float = 0.5
@@ -30,28 +32,41 @@ class BaseScraper:
     )
 
     def __post_init__(self) -> None:
-        self.session = requests.Session()
+        self._session: httpx.AsyncClient | None = None
 
-    def get(self, url: str, *, params: dict | None = None) -> str:
+    @property
+    def session(self) -> httpx.AsyncClient:
+        if self._session is None or self._session.is_closed:
+            self._session = httpx.AsyncClient(
+                headers=dict(self.headers),
+                timeout=self.timeout,
+                transport=httpx.AsyncHTTPTransport(verify=STORE_SSL_VERIFY, retries=self.max_retries),
+            )
+        return self._session
+
+    async def aclose(self) -> None:
+        if self._session is not None:
+            await self._session.aclose()
+            self._session = None
+
+    async def get(self, url: str, *, params: dict | None = None) -> str:
         last_error: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
             if self.delay_seconds > 0:
-                time.sleep(self.delay_seconds)
+                await asyncio.sleep(self.delay_seconds)
 
             try:
-                response = self.session.get(
+                response = await self.session.get(
                     url,
                     params=params,
-                    headers=dict(self.headers),
                     timeout=self.timeout,
                 )
                 response.raise_for_status()
                 return response.text
-            except requests.RequestException as exc:
+            except httpx.HTTPError as exc:
                 last_error = exc
                 logger.warning("Scraper request failed on attempt %s/%s: %s", attempt, self.max_retries, exc)
                 if attempt < self.max_retries:
-                    time.sleep(self.backoff_seconds * (2 ** (attempt - 1)))
+                    await asyncio.sleep(self.backoff_seconds * (2 ** (attempt - 1)))
 
         raise ScraperRequestError(f"Failed to fetch {url}") from last_error
-

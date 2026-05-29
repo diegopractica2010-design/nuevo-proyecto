@@ -1,55 +1,30 @@
+"""
+Shared utilities for web scrapers.
+
+This module contains the common dataclasses, exceptions, and utility functions
+used across scraper implementations (e.g., LiderScraper, JumboScraper).
+
+The scraping logic itself has been consolidated into:
+- backend/infrastructure/scrapers/lider.py (LiderScraper class)
+- backend/scraper_jumbo.py (Jumbo scraper)
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
-from unicodedata import normalize as unicode_normalize
-from urllib.parse import quote_plus
 
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
-from backend.config import (
-    API_HEADERS,
-    AUTOCOMPLETE_LIMIT,
-    AUTOCOMPLETE_URL,
-    HTML_HEADER_PROFILES,
-    REQUEST_TIMEOUT,
-    SEARCH_URL,
-    SLUG_URL,
-    STORE_SSL_VERIFY,
-    SUGGESTION_FALLBACK_LIMIT,
-)
-from backend.compliance import assert_live_store_access_allowed
-from backend.parser import _parse_search_result, parse_catalog_page
+from backend.domain.constants import CHARCOAL_TERMS, QUERY_STOPWORDS
+from backend.domain.normalization.text import normalize_text
 
 
-QUERY_STOPWORDS = {
-    "de",
-    "del",
-    "la",
-    "las",
-    "el",
-    "los",
-    "un",
-    "una",
-    "unos",
-    "unas",
-    "saco",
-    "bolsa",
-    "paquete",
-    "pack",
-}
-
-CHARCOAL_TERMS = {"briqueta", "briquetas", "vegetal", "quincho", "quebracho", "espino"}
-LIDER_GRAPHQL_URL = "https://super.lider.cl/orchestra/graphql"
-
-
+# Exceptions
 class ScraperError(RuntimeError):
+    """Base exception for scraper errors."""
     pass
 
 
 class NoResultsError(ScraperError):
+    """Raised when a scraper query returns no results."""
     def __init__(self, query: str, *, attempts: list[str] | None = None, suggestions: list[str] | None = None):
         super().__init__(f'No se encontraron productos para "{query}"')
         self.query = query
@@ -57,16 +32,10 @@ class NoResultsError(ScraperError):
         self.suggestions = suggestions or []
 
 
-@dataclass(slots=True)
-class SearchPage:
-    query: str
-    html: str
-    url: str
-    strategy: str
-
-
+# Dataclasses
 @dataclass(slots=True)
 class ScrapedSearchResult:
+    """Result of a scraper search operation."""
     query: str
     applied_query: str
     products: list[dict]
@@ -77,39 +46,22 @@ class ScrapedSearchResult:
     warning: str | None = None
 
 
-def _build_session(headers: dict[str, str]) -> requests.Session:
-    retry_strategy = Retry(
-        total=2,
-        read=2,
-        connect=2,
-        backoff_factor=0.5,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET"],
-    )
-    adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=4, pool_maxsize=4)
-
-    session = requests.Session()
-    session.headers.update(headers)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
-
-
+# Utility functions
 def normalize_query(query: str) -> str:
-    normalized = unicode_normalize("NFC", " ".join((query or "").split()).strip())
+    """Normalize a search query for consistent processing."""
+    normalized = normalize_text(query or "")
     if not normalized:
         raise ScraperError("La consulta está vacía")
     return normalized
 
 
-def _slugify_query(query: str) -> str:
-    ascii_query = unicode_normalize("NFKD", query).encode("ascii", "ignore").decode("ascii")
-    return "-".join(part for part in ascii_query.lower().split() if part)
-
-
 def fallback_query_variants(query: str) -> list[str]:
+    """Generate fallback query variants for search resilience.
+    
+    Removes stopwords, extracts last token, and handles special cases like 'tallarines'.
+    """
     normalized = normalize_query(query)
-    ascii_query = unicode_normalize("NFKD", normalized).encode("ascii", "ignore").decode("ascii")
+    ascii_query = normalize_text(normalized)
     variants: list[str] = []
     seen = {normalized.lower()}
 
@@ -137,11 +89,12 @@ def fallback_query_variants(query: str) -> list[str]:
 
 
 def _rank_text(value: Any) -> str:
-    text = unicode_normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
-    return text.lower()
+    """Convert value to normalized ASCII text for ranking."""
+    return normalize_text(str(value or ""))
 
 
 def rank_products_for_query(products: list[dict], query: str) -> list[dict]:
+    """Rank products by relevance to the query using token matching."""
     ascii_query = _rank_text(query)
     tokens = [token for token in ascii_query.split() if token not in QUERY_STOPWORDS]
     if not tokens:
@@ -162,321 +115,3 @@ def rank_products_for_query(products: list[dict], query: str) -> list[dict]:
         return value
 
     return sorted(products, key=score, reverse=True)
-
-
-def _is_blocked_page(html: str) -> bool:
-    markers = (
-        "Robot or human?",
-        "px-captcha",
-        "Press and hold",
-        "Access to this page has been denied",
-    )
-    return any(marker in html for marker in markers)
-
-
-def _request_text(url: str, headers: dict[str, str]) -> tuple[str, str]:
-    response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT, verify=STORE_SSL_VERIFY)
-    response.raise_for_status()
-    return response.text, response.url
-
-
-def _find_search_result(value: Any) -> dict | None:
-    if isinstance(value, dict):
-        candidate = value.get("searchResult")
-        if isinstance(candidate, dict):
-            return candidate
-        if isinstance(value.get("itemStacks"), list):
-            return value
-        for nested in value.values():
-            found = _find_search_result(nested)
-            if found:
-                return found
-    elif isinstance(value, list):
-        for item in value:
-            found = _find_search_result(item)
-            if found:
-                return found
-    return None
-
-
-def _graphql_payloads(query: str, page: int) -> list[dict[str, Any]]:
-    variables = {"query": query, "page": page, "prg": "desktop", "sort": "best_match"}
-    fragment = """
-        itemStacks {
-          items {
-            id
-            usItemId
-            name
-            brand
-            canonicalUrl
-            image
-            imageInfo { thumbnailUrl allImages { url } }
-            sellerName
-            category { path name }
-            priceInfo { linePrice itemPrice wasPrice unitPrice savings savingsAmt }
-            availabilityStatusV2 { value display }
-            badges { text key type }
-          }
-        }
-    """
-    return [
-        {
-            "operationName": "getSearch",
-            "variables": variables,
-            "query": (
-                "query getSearch($query: String, $page: Int, $prg: String, $sort: String) "
-                f"{{ search(searchQuery: $query, page: $page, prg: $prg, sort: $sort) {{ {fragment} }} }}"
-            ),
-        },
-        {
-            "operationName": "getSearchPage",
-            "variables": variables,
-            "query": (
-                "query getSearchPage($query: String, $page: Int, $prg: String, $sort: String) "
-                f"{{ searchResult(query: $query, page: $page, prg: $prg, sort: $sort) {{ {fragment} }} }}"
-            ),
-        },
-    ]
-
-
-def _fetch_graphql_page(query: str, page: int, limit: int) -> ScrapedSearchResult:
-    normalized_query = normalize_query(query)
-    attempts: list[str] = []
-    session = _build_session(API_HEADERS)
-    try:
-        for payload in _graphql_payloads(normalized_query, page):
-            operation = str(payload.get("operationName") or "graphql")
-            try:
-                assert_live_store_access_allowed("lider", LIDER_GRAPHQL_URL, purpose="search")
-                response = session.post(
-                    LIDER_GRAPHQL_URL,
-                    json=payload,
-                    timeout=REQUEST_TIMEOUT,
-                    verify=STORE_SSL_VERIFY,
-                )
-                response.raise_for_status()
-                search_result = _find_search_result(response.json())
-                if not search_result:
-                    attempts.append(f"{operation}: sin searchResult")
-                    continue
-                products = _parse_search_result(search_result, limit)
-                if products:
-                    return ScrapedSearchResult(
-                        query=normalized_query,
-                        applied_query=normalized_query,
-                        products=products[:limit],
-                        source_url=response.url,
-                        fetch_strategy=f"graphql:{operation}:page:{page}",
-                        parse_strategy="lider_graphql",
-                    )
-                attempts.append(f"{operation}: sin productos parseables")
-            except Exception as exc:
-                attempts.append(f"{operation}: {exc}")
-    finally:
-        session.close()
-
-    raise NoResultsError(normalized_query, attempts=attempts)
-
-
-def fetch_autocomplete_terms(query: str) -> list[str]:
-    normalized_query = normalize_query(query)
-    assert_live_store_access_allowed(
-        "lider",
-        f"{AUTOCOMPLETE_URL}?term={quote_plus(normalized_query)}",
-        purpose="search",
-    )
-    session = _build_session(API_HEADERS)
-    try:
-        response = session.get(
-            AUTOCOMPLETE_URL,
-            params={"term": normalized_query},
-            timeout=REQUEST_TIMEOUT,
-            verify=STORE_SSL_VERIFY,
-        )
-        response.raise_for_status()
-        payload: Any = response.json()
-    except Exception:
-        return []
-    finally:
-        session.close()
-
-    if not isinstance(payload, dict):
-        return []
-
-    terms = payload.get("terms")
-    if not isinstance(terms, list):
-        return []
-
-    unique_terms: list[str] = []
-    seen: set[str] = set()
-    for raw_term in terms:
-        term = normalize_query(str(raw_term))
-        key = term.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        unique_terms.append(term)
-        if len(unique_terms) >= AUTOCOMPLETE_LIMIT:
-            break
-
-    return unique_terms
-
-
-def _with_page(url: str, page: int) -> str:
-    if page <= 1:
-        return url
-    separator = "&" if "?" in url else "?"
-    return f"{url}{separator}page={page}"
-
-
-def _product_key(product: dict) -> str:
-    return (
-        str(product.get("sku") or product.get("id") or product.get("url") or "")
-        or f"{product.get('name')}::{product.get('price')}"
-    )
-
-
-def _candidate_pages(query: str, page: int = 1) -> list[tuple[str, str, dict[str, str]]]:
-    slug = _slugify_query(query)
-    search_url = _with_page(SEARCH_URL.format(query=quote_plus(query)), page)
-    slug_url = SLUG_URL.format(slug=slug)
-
-    candidates: list[tuple[str, str, dict[str, str]]] = []
-    for profile_name, headers in HTML_HEADER_PROFILES:
-        candidates.append((f"search:{profile_name}:page:{page}", search_url, headers))
-
-    if page == 1:
-        candidates.append(("slug:browser", slug_url, HTML_HEADER_PROFILES[0][1]))
-    return candidates
-
-
-def _fetch_catalog_page(query: str, page: int, limit: int) -> ScrapedSearchResult:
-    normalized_query = normalize_query(query)
-    attempts: list[str] = []
-    had_catalog_response = False
-
-    try:
-        return _fetch_graphql_page(normalized_query, page, limit)
-    except NoResultsError as exc:
-        attempts.extend(exc.attempts)
-    except ScraperError as exc:
-        attempts.append(f"graphql: {exc}")
-
-    for strategy_name, url, headers in _candidate_pages(normalized_query, page):
-        try:
-            assert_live_store_access_allowed("lider", url, purpose="search")
-            html, resolved_url = _request_text(url, headers)
-            if _is_blocked_page(html):
-                attempts.append(f"{strategy_name}: bloqueado por anti-bot")
-                continue
-
-            had_catalog_response = True
-            parsed = parse_catalog_page(html, limit=limit)
-            if parsed.products:
-                return ScrapedSearchResult(
-                    query=normalized_query,
-                    applied_query=normalized_query,
-                    products=parsed.products[:limit],
-                    source_url=resolved_url,
-                    fetch_strategy=strategy_name,
-                    parse_strategy=parsed.parser or "unknown",
-                )
-
-            attempts.append(f"{strategy_name}: sin productos parseables")
-        except Exception as exc:
-            attempts.append(f"{strategy_name}: {exc}")
-
-    if had_catalog_response:
-        raise NoResultsError(normalized_query, attempts=attempts)
-
-    raise ScraperError(" | ".join(attempts) or "Lider no respondió con una página utilizable")
-
-
-def _execute_catalog_query(query: str, limit: int) -> ScrapedSearchResult:
-    normalized_query = normalize_query(query)
-    products: list[dict] = []
-    seen: set[str] = set()
-    source_url: str | None = None
-    fetch_strategies: list[str] = []
-    parse_strategy: str | None = None
-    page = 1
-
-    while len(products) < limit:
-        try:
-            page_result = _fetch_catalog_page(normalized_query, page, limit)
-        except (NoResultsError, ScraperError):
-            if products:
-                break
-            raise
-        page_products = page_result.products
-        new_count = 0
-
-        for product in page_products:
-            key = _product_key(product)
-            if key in seen:
-                continue
-            seen.add(key)
-            product = dict(product)
-            product["position"] = len(products) + 1
-            products.append(product)
-            new_count += 1
-            if len(products) >= limit:
-                break
-
-        source_url = source_url or page_result.source_url
-        fetch_strategies.append(page_result.fetch_strategy)
-        parse_strategy = parse_strategy or page_result.parse_strategy
-
-        if not page_products or new_count == 0:
-            break
-        page += 1
-
-    if not products:
-        raise NoResultsError(normalized_query)
-
-    ranked_products = rank_products_for_query(products[:limit], normalized_query)
-
-    return ScrapedSearchResult(
-        query=normalized_query,
-        applied_query=normalized_query,
-        products=ranked_products,
-        source_url=source_url or SEARCH_URL.format(query=quote_plus(normalized_query)),
-        fetch_strategy=" + ".join(fetch_strategies),
-        parse_strategy=parse_strategy or "unknown",
-    )
-
-
-def search_lider(query: str, limit: int) -> ScrapedSearchResult:
-    normalized_query = normalize_query(query)
-    suggestions = fetch_autocomplete_terms(normalized_query)
-
-    try:
-        result = _execute_catalog_query(normalized_query, limit)
-        result.suggestions = suggestions
-        return result
-    except NoResultsError as exc:
-        fallback_terms = [
-            term
-            for term in suggestions
-            if term.lower() != normalized_query.lower()
-        ][:SUGGESTION_FALLBACK_LIMIT]
-
-        query_variants = fallback_query_variants(normalized_query)
-        for term in [*query_variants, *fallback_terms]:
-            try:
-                rescued = _execute_catalog_query(term, limit)
-                rescued.suggestions = suggestions
-                rescued.warning = (
-                    f'No hubo coincidencias directas para "{normalized_query}". '
-                    f'Se muestran resultados reales para "{term}".'
-                )
-                rescued.applied_query = term
-                return rescued
-            except ScraperError:
-                continue
-
-        raise NoResultsError(
-            normalized_query,
-            attempts=exc.attempts,
-            suggestions=suggestions,
-        ) from exc

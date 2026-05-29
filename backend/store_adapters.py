@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Awaitable, Callable
 
-from backend.scraper import ScrapedSearchResult, search_lider
+from backend.scraper import ScrapedSearchResult
+from backend.infrastructure.scrapers.lider import LiderScraper
 from backend.scraper_jumbo import search_jumbo
 
 
-SearchFn = Callable[[str, int], ScrapedSearchResult]
+SearchFn = Callable[[str, int], Awaitable[ScrapedSearchResult]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,12 +19,12 @@ class StoreAdapter:
     experimental: bool = False
 
 
-def _lider_search(query: str, limit: int) -> ScrapedSearchResult:
-    return search_lider(query, limit=limit)
+async def _lider_search(query: str, limit: int) -> ScrapedSearchResult:
+    return await LiderScraper().search(query, limit=limit)
 
 
-def _jumbo_search(query: str, limit: int) -> ScrapedSearchResult:
-    return search_jumbo(query, limit=limit)
+async def _jumbo_search(query: str, limit: int) -> ScrapedSearchResult:
+    return await search_jumbo(query, limit=limit)
 
 
 STORE_ADAPTERS: dict[str, StoreAdapter] = {

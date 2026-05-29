@@ -1,3 +1,5 @@
+import asyncio
+
 from backend.models import Product, SearchResponse
 from backend.shopping_list_service import (
     ShoppingListItem,
@@ -107,7 +109,7 @@ def test_compare_shopping_list_isolates_one_store_failure(monkeypatch):
 
     monkeypatch.setattr("backend.shopping_list_service.search_products", fake_search)
 
-    result = compare_shopping_list([ShoppingListItem(query="arroz 1 kilo")])
+    result = asyncio.run(compare_shopping_list([ShoppingListItem(query="arroz 1 kilo")]))
 
     item = result["items"][0]
     lider = item["stores"][0]

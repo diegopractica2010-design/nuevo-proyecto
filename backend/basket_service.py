@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 from backend.db import SessionLocal
-from backend.db_models import BasketItemRecord, BasketRecord, PriceHistoryRecord
+from backend.infrastructure.db.models import BasketItemRecord, BasketRecord, PriceHistoryRecord
 from backend.models_baskets import Basket, BasketItem, BasketSummary, PriceHistory
 from backend.repositories import BasketRepository, PriceHistoryRepository
 

@@ -1,12 +1,15 @@
+# ORPHAN: wire to Celery beat schedule or delete
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Iterable
 
-from backend.scraper import ScraperError, search_lider
+from backend.scraper import ScraperError
 from backend.scraper_jumbo import search_jumbo
 from backend.compliance import ComplianceError
+from backend.infrastructure.scrapers.lider import LiderScraper
 
 
 DEFAULT_LIDER_SEEDS = [
@@ -112,7 +115,7 @@ def index_lider_catalog(
             remaining = per_seed_limit
             if max_products is not None:
                 remaining = min(remaining, max_products - len(products))
-            result = search_lider(seed, limit=remaining)
+            result = asyncio.run(LiderScraper().search(seed, limit=remaining))
         except ScraperError as exc:
             errors.append(f"{seed}: {exc}")
             continue
@@ -146,7 +149,7 @@ def index_jumbo_catalog(
         "La indexacion masiva de Jumbo esta deshabilitada para respetar politicas/robots.txt. "
         "Usa una fuente autorizada o permiso escrito antes de habilitarla."
     )
-    result = search_jumbo(query, limit=max_products)
+    result = asyncio.run(search_jumbo(query, limit=max_products))
     products: list[dict] = []
     seen: set[str] = set()
 

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+import asyncio
+
 from backend.infrastructure.scrapers.lider import LiderScraper, _parse_price_string
 
 
@@ -86,7 +88,7 @@ def test_parse_price_string(text, expected):
 
 @pytest.mark.skip(reason="Test de integracion: requiere red.")
 def test_scraper_con_lider_real():
-    products = LiderScraper().search("leche", limit=5)
+    products = asyncio.run(LiderScraper().search("leche", limit=5))
     assert len(products) >= 1
     for product in products:
         assert product.name

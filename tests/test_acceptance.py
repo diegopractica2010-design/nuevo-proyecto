@@ -1,7 +1,8 @@
+import asyncio
 import os
 import time
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,7 +35,11 @@ def _search_response(query: str, store: str, price: float) -> SearchResponse:
 
 @pytest.mark.parametrize("store", ["lider", "jumbo"])
 def test_search_endpoint_returns_products_for_store(store):
-    with patch("backend.main.search_products", return_value=_search_response("arroz", store, 1290)):
+    with patch(
+        "backend.main.search_products",
+        new_callable=AsyncMock,
+        return_value=_search_response("arroz", store, 1290),
+    ):
         response = client.get(f"/search?q=arroz&store={store}")
 
     assert response.status_code == 200
@@ -108,8 +113,14 @@ def test_scraper_health_canonical_queries_succeed(monkeypatch, tmp_path):
         parse_strategy="vtex_catalog_api",
     )
 
-    monkeypatch.setattr("backend.scraper.search_lider", lambda query, limit: lider)
-    monkeypatch.setattr("backend.scraper_jumbo.search_jumbo", lambda query, limit: jumbo)
+    async def fake_lider_search(self, query, limit):
+        return lider
+
+    async def fake_jumbo_search(query, limit):
+        return jumbo
+
+    monkeypatch.setattr("backend.infrastructure.scrapers.lider.LiderScraper.search", fake_lider_search)
+    monkeypatch.setattr("backend.scraper_jumbo.search_jumbo", fake_jumbo_search)
 
     result = parser_monitor.run_full_check()
 
@@ -142,7 +153,7 @@ def test_db_cache_serves_recent_searches(monkeypatch):
 
     from backend.search_service import search_products
 
-    response = search_products("arroz", store="lider", limit=10)
+    response = asyncio.run(search_products("arroz", store="lider", limit=10))
 
     assert response.strategy == "db-fresh"
     assert response.results[0].price == 1290
@@ -180,7 +191,7 @@ def test_unit_price_calculation(monkeypatch):
     monkeypatch.setattr("backend.search_service._get_db_search_response", lambda query, store, limit: (None, None))
     monkeypatch.setattr("backend.search_service.get_store_adapter", lambda store: adapter)
 
-    response = search_products("arroz", store="lider", limit=10)
+    response = asyncio.run(search_products("arroz", store="lider", limit=10))
 
     assert response.results[0].unit_price == "$2.000/kg"
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import inspect
 import logging
 from threading import Thread
 from threading import Lock
@@ -52,7 +54,12 @@ class CacheEntry:
 
 _CACHE: dict[str, CacheEntry] = {}
 _CACHE_LOCK = Lock()
-_PERSIST_LOCK = Lock()
+
+
+async def _maybe_await(value):
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 def clear_search_cache():
@@ -135,6 +142,41 @@ def _set_cache(store: str, query: str, limit: int, response: SearchResponse):
         )
 
 
+def _persist_prices(results: list[Product], store: str) -> None:
+    try:
+        observed_at = datetime.now(UTC)
+        with SessionLocal() as session:
+            store_record = _get_or_create_store(session, store)
+            product_repo = ProductRepo(session)
+            price_repo = PriceRepo(session)
+
+            for product in results:
+                try:
+                    domain_product = canonicalize(" ".join(
+                        value for value in [product.name, product.brand or ""] if value
+                    ))
+                    product_repo.upsert(domain_product)
+                    session.flush()
+                    price_repo.insert(
+                        Price(
+                            product_key=domain_product.canonical_key,
+                            store_id=str(store_record.id),
+                            value=float(product.price),
+                            observed_at=observed_at,
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning("Skipping price persistence for product=%s: %s", product.name, exc)
+                    session.rollback()
+                    store_record = _get_or_create_store(session, store)
+                    product_repo = ProductRepo(session)
+                    price_repo = PriceRepo(session)
+
+            session.commit()
+    except Exception as exc:
+        logger.warning("Background price persistence failed store=%s: %s", store, exc, exc_info=True)
+
+
 def _build_facets(products: list[Product]) -> SearchFacets:
     price_values = [product.price for product in products]
     brand_counts = Counter(product.brand for product in products if product.brand)
@@ -184,7 +226,7 @@ def _empty_response(
     )
 
 
-def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") -> SearchResponse:
+async def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") -> SearchResponse:
     normalized_query = normalize_query(query)
     store = (store or "lider").strip().lower()
     limit = max(1, min(limit, MAX_RESULTS))
@@ -208,7 +250,7 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
 
     logger.info("Ejecutando busqueda en vivo para query=%s, store=%s", normalized_query, store)
     try:
-        results = adapter.search(normalized_query, limit)
+        results = await _maybe_await(adapter.search(normalized_query, limit))
         if results and results.products:
             response = _build_response_from_scrape(
                 query=normalized_query,
@@ -221,7 +263,6 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
                 suggestions=getattr(results, "suggestions", []),
             )
             _set_cache(store, normalized_query, limit, response)
-            _persist_search_response_async(response)
             logger.info("Busqueda exitosa: %d productos encontrados", len(response.results))
             return response
 
@@ -253,16 +294,19 @@ def search_products(query: str, limit: int = MAX_RESULTS, store: str = "lider") 
 
 
 def _start_background_refresh(query: str, limit: int, store: str) -> None:
-    thread = Thread(target=_refresh_search_background, args=(query, limit, store), daemon=True)
+    thread = Thread(
+        target=lambda: asyncio.run(_refresh_search_background(query, limit, store)),
+        daemon=True,
+    )
     thread.start()
 
 
-def _refresh_search_background(query: str, limit: int, store: str) -> None:
+async def _refresh_search_background(query: str, limit: int, store: str) -> None:
     try:
         adapter = get_store_adapter(store)
         if not adapter:
             return
-        results = adapter.search(query, limit)
+        results = await _maybe_await(adapter.search(query, limit))
         if results and results.products:
             response = _build_response_from_scrape(
                 query=query,
@@ -275,14 +319,9 @@ def _refresh_search_background(query: str, limit: int, store: str) -> None:
                 suggestions=getattr(results, "suggestions", []),
             )
             _set_cache(store, query, limit, response)
-            _persist_search_response(response)
+            _persist_prices(response.results, response.source)
     except Exception as exc:
         logger.warning("Background refresh failed store=%s query=%s: %s", store, query, exc)
-
-
-def _persist_search_response_async(response: SearchResponse) -> None:
-    thread = Thread(target=_persist_search_response, args=(response,), daemon=True)
-    thread.start()
 
 
 def _store_display_name(store: str) -> str:
@@ -300,44 +339,6 @@ def _get_or_create_store(session, store: str) -> StoreRecord:
     session.add(record)
     session.flush()
     return record
-
-
-def _persist_search_response(response: SearchResponse) -> None:
-    observed_at = datetime.now(UTC)
-    try:
-        with _PERSIST_LOCK:
-            with SessionLocal() as session:
-                store = _get_or_create_store(session, response.source)
-                product_repo = ProductRepo(session)
-                price_repo = PriceRepo(session)
-                seen_price_keys: set[str] = set()
-                for product in response.results:
-                    try:
-                        domain_product = canonicalize(" ".join(
-                            value for value in [product.name, product.brand or ""] if value
-                        ))
-                        record = product_repo.upsert(domain_product)
-                        session.flush()
-                        if record.canonical_key in seen_price_keys:
-                            continue
-                        seen_price_keys.add(record.canonical_key)
-                        price_repo.insert(
-                            Price(
-                                product_key=record.canonical_key,
-                                store_id=str(store.id),
-                                value=float(product.price),
-                                observed_at=observed_at,
-                            )
-                        )
-                    except Exception as exc:
-                        logger.debug("Skipping DB persistence for product=%s: %s", product.name, exc)
-                        session.rollback()
-                        store = _get_or_create_store(session, response.source)
-                        product_repo = ProductRepo(session)
-                        price_repo = PriceRepo(session)
-                session.commit()
-    except Exception as exc:
-        logger.warning("Search persistence failed source=%s query=%s: %s", response.source, response.query, exc)
 
 
 def _get_db_search_response(query: str, store: str, limit: int) -> tuple[SearchResponse | None, timedelta | None]:

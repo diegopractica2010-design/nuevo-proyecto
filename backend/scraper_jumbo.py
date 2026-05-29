@@ -5,9 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote_plus, urljoin
 
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import httpx
 
 from backend.config import (
     HTML_HEADER_PROFILES,
@@ -53,34 +51,25 @@ class ScrapedSearchResult:
     parse_strategy: str = "next_data"
 
 
-def _create_session() -> requests.Session:
-    session = requests.Session()
-    retry = Retry(
-        total=3,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
+def _create_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        timeout=REQUEST_TIMEOUT,
+        transport=httpx.AsyncHTTPTransport(verify=STORE_SSL_VERIFY, retries=3),
     )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
 
 
-def _session_get(session: requests.Session, url: str, **kwargs):
-    try:
-        return session.get(url, verify=STORE_SSL_VERIFY, **kwargs)
-    except TypeError:
-        return session.get(url, **kwargs)
+async def _client_get(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+    return await client.get(url, **kwargs)
 
 
-def _execute_catalog_query(session: requests.Session, query: str, limit: int) -> ScrapedSearchResult:
+async def _execute_catalog_query(client: httpx.AsyncClient, query: str, limit: int) -> ScrapedSearchResult:
     """Execute a catalog search query for Jumbo."""
     url = JUMBO_SEARCH_URL.format(query=quote_plus(query))
 
     attempts: list[str] = []
 
     try:
-        result = _execute_catalog_api_query(session, query, limit)
+        result = await _execute_catalog_api_query(client, query, limit)
         if result.products:
             return result
     except Exception as exc:
@@ -89,7 +78,7 @@ def _execute_catalog_query(session: requests.Session, query: str, limit: int) ->
     for profile_name, headers in HTML_HEADER_PROFILES:
         try:
             assert_live_store_access_allowed("jumbo", url, purpose="search")
-            response = _session_get(session, url, headers=headers, timeout=REQUEST_TIMEOUT)
+            response = await _client_get(client, url, headers=headers, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
             parsed = parse_catalog_page(
@@ -102,7 +91,7 @@ def _execute_catalog_query(session: requests.Session, query: str, limit: int) ->
                     query=query,
                     applied_query=query,
                     products=parsed.products,
-                    source_url=response.url,
+                    source_url=str(response.url),
                     fetch_strategy=f"search:{profile_name}",
                     parse_strategy=parsed.parser or "unknown",
                 )
@@ -113,8 +102,8 @@ def _execute_catalog_query(session: requests.Session, query: str, limit: int) ->
     raise NoResultsError(query, attempts=attempts)
 
 
-def _execute_catalog_api_query(
-    session: requests.Session,
+async def _execute_catalog_api_query(
+    client: httpx.AsyncClient,
     query: str,
     limit: int,
 ) -> ScrapedSearchResult:
@@ -138,21 +127,21 @@ def _execute_catalog_api_query(
     source_url = JUMBO_CATALOG_API_URL
 
     while len(products) < limit:
-        request = requests.Request(
+        request = client.build_request(
             "GET",
             JUMBO_CATALOG_API_URL,
             params={"ft": query, "page": page, "sc": 11},
-        ).prepare()
-        assert_live_store_access_allowed("jumbo", request.url or JUMBO_CATALOG_API_URL, purpose="search")
-        response = _session_get(
-            session,
+        )
+        assert_live_store_access_allowed("jumbo", str(request.url), purpose="search")
+        response = await _client_get(
+            client,
             JUMBO_CATALOG_API_URL,
             params={"ft": query, "page": page, "sc": 11},
             headers=headers,
             timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
-        source_url = response.url
+        source_url = str(response.url)
 
         payload = response.json()
         raw_products = payload.get("products", []) if isinstance(payload, dict) else payload
@@ -277,18 +266,18 @@ def _to_text(value: Any) -> str | None:
     return text or None
 
 
-def search_jumbo(query: str, limit: int = 100) -> ScrapedSearchResult:
+async def search_jumbo(query: str, limit: int = 100) -> ScrapedSearchResult:
     """Search for products on Jumbo.cl."""
     normalized_query = normalize_query(query)
 
-    with _create_session() as session:
+    async with _create_client() as client:
         try:
-            result = _execute_catalog_query(session, normalized_query, limit)
+            result = await _execute_catalog_query(client, normalized_query, limit)
             for variant in fallback_query_variants(normalized_query):
                 if variant == normalized_query or "tallarin" not in variant or "tallarines" in variant:
                     continue
                 try:
-                    extra = _execute_catalog_query(session, variant, limit)
+                    extra = await _execute_catalog_query(client, variant, limit)
                 except NoResultsError:
                     continue
                 result.products = _merge_products(result.products, extra.products, limit)
@@ -297,7 +286,7 @@ def search_jumbo(query: str, limit: int = 100) -> ScrapedSearchResult:
         except NoResultsError as exc:
             for variant in fallback_query_variants(normalized_query):
                 try:
-                    rescued = _execute_catalog_query(session, variant, limit)
+                    rescued = await _execute_catalog_query(client, variant, limit)
                 except NoResultsError:
                     continue
                 rescued.query = normalized_query

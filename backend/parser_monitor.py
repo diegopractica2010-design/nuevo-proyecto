@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -61,14 +62,14 @@ def check_store(store: str, query: str = "arroz") -> dict[str, Any]:
 
     try:
         if store == "lider":
-            from backend.scraper import search_lider
+            from backend.infrastructure.scrapers.lider import LiderScraper
 
-            result = search_lider(query=query, limit=10)
+            result = asyncio.run(LiderScraper().search(query=query, limit=10))
             parse_strategy = _normalize_parse_strategy(store, result.parse_strategy)
         elif store == "jumbo":
             from backend.scraper_jumbo import search_jumbo
 
-            result = search_jumbo(query=query, limit=10)
+            result = asyncio.run(search_jumbo(query=query, limit=10))
             parse_strategy = _normalize_parse_strategy(store, result.parse_strategy)
         else:
             raise ValueError(f"Tienda desconocida: {store}")

@@ -1,10 +1,10 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from backend.db import SessionLocal, reset_db
-from backend.domain.normalization.matching import canonicalize
 from backend.infrastructure.db.models import PriceRecord, ProductRecord, StoreRecord
 from backend.infrastructure.scrapers.lider import LiderScraper, ScrapedProduct
+from backend.scraper import ScrapedSearchResult
 from backend.tasks.scrape_tasks import scrape_lider
 
 
@@ -33,13 +33,16 @@ class AsyncScraperTests(unittest.TestCase):
 
     @patch("backend.tasks.scrape_tasks.LiderScraper.search")
     def test_scrape_lider_task_inserts_products_and_prices(self, mock_search):
-        mock_search.return_value = [
-            ScrapedProduct(
-                name="Arroz Tucapel 1kg",
-                price=1290.0,
-                product=canonicalize("Arroz Tucapel 1kg"),
+        mock_search.side_effect = AsyncMock(
+            return_value=ScrapedSearchResult(
+            query="arroz",
+            applied_query="arroz",
+            products=[{"name": "Arroz Tucapel 1kg", "price": 1290.0}],
+            source_url="https://super.lider.cl/search?q=arroz",
+            fetch_strategy="search:browser",
+            parse_strategy="html_fallback",
             )
-        ]
+        )
 
         result = scrape_lider.apply(args=("arroz",), kwargs={"limit": 10}, throw=True).get()
 

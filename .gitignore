@@ -79,6 +79,7 @@ logs/
 .env.production
 .env.staging
 data/
+data/celerybeat-schedule
 *.db
 !data/.gitkeep
 /data/backups/

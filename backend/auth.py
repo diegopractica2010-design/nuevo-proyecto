@@ -11,7 +11,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from backend.db import SessionLocal
-from backend.db_models import UserRecord
+from backend.infrastructure.db.models import UserRecord
 from backend.repositories import UserRepository
 
 logger = logging.getLogger(__name__)
