@@ -6,7 +6,7 @@ from typing import Optional
 
 from backend.db import SessionLocal
 from backend.infrastructure.db.models import BasketItemRecord, BasketRecord, PriceHistoryRecord
-from backend.models_baskets import Basket, BasketItem, BasketSummary, PriceHistory
+from backend.models_baskets import Basket, BasketItem, BasketSummary, PaginatedBaskets, PriceHistory
 from backend.repositories import BasketRepository, PriceHistoryRepository
 
 
@@ -64,7 +64,11 @@ class BasketService:
             return _to_basket(basket) if basket else None
 
     @staticmethod
-    def get_user_baskets(user_id: Optional[str] = None) -> list[BasketSummary]:
+    def get_user_baskets(
+        user_id: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> PaginatedBaskets:
         with SessionLocal() as session:
             records = BasketRepository(session).list_for_user(user_id)
 
@@ -82,7 +86,16 @@ class BasketService:
                     created_at=basket.created_at,
                 )
             )
-        return sorted(summaries, key=lambda item: item.created_at, reverse=True)
+        all_sorted = sorted(summaries, key=lambda item: item.created_at, reverse=True)
+        total = len(all_sorted)
+        page = all_sorted[offset : offset + limit]
+        return PaginatedBaskets(
+            items=page,
+            total=total,
+            limit=limit,
+            offset=offset,
+            has_more=(offset + limit) < total,
+        )
 
     @staticmethod
     def add_to_basket(basket_id: str, product_data: dict, quantity: int = 1) -> bool:

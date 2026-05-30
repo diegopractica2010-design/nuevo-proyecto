@@ -142,7 +142,7 @@ class TestFix4JWTHardening(unittest.TestCase):
             json={
                 "username": "testuser",
                 "email": "test@example.com",
-                "password": "password123"
+                "password": "Test@Secure1234!"
             }
         )
     
@@ -162,7 +162,7 @@ class TestFix4JWTHardening(unittest.TestCase):
         # Login to get token
         login_response = self.client.post(
             "/auth/login",
-            json={"username": "testuser", "password": "password123"}
+            json={"username": "testuser", "password": "Test@Secure1234!"}
         )
         self.assertEqual(login_response.status_code, 200)
         token = login_response.json()["access_token"]
@@ -184,7 +184,7 @@ class TestFix4JWTHardening(unittest.TestCase):
         # Login to get token
         login_response = self.client.post(
             "/auth/login",
-            json={"username": "testuser", "password": "password123"}
+            json={"username": "testuser", "password": "Test@Secure1234!"}
         )
         token1 = login_response.json()["access_token"]
         
@@ -222,7 +222,7 @@ class TestFix4JWTHardening(unittest.TestCase):
         # Login with real user to get token
         login_response = self.client.post(
             "/auth/login",
-            json={"username": "testuser", "password": "password123"}
+            json={"username": "testuser", "password": "Test@Secure1234!"}
         )
         token = login_response.json()["access_token"]
         
@@ -242,15 +242,15 @@ class TestFix4JWTHardening(unittest.TestCase):
             json={
                 "username": "newuser",
                 "email": "new@example.com",
-                "password": "password456"
+                "password": "Test@Secure1234!"
             }
         )
         self.assertEqual(register_response.status_code, 200)
-        
+
         # /auth/login should still work
         login_response = self.client.post(
             "/auth/login",
-            json={"username": "newuser", "password": "password456"}
+            json={"username": "newuser", "password": "Test@Secure1234!"}
         )
         self.assertEqual(login_response.status_code, 200)
         

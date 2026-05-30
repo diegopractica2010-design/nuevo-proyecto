@@ -81,12 +81,15 @@ async def client(db_session: Session) -> AsyncIterator[AsyncClient]:
     app.dependency_overrides.pop(get_db, None)
 
 
+_TEST_PASSWORD = "Test@Secure1234!"  # meets new policy: 12+ chars, uppercase, digit, special
+
+
 @pytest.fixture()
 def test_user(db_session: Session) -> UserRecord:
     user = UserRecord(
         username="testuser",
         email="testuser@example.com",
-        hashed_password=pwd_context.hash("password123"),
+        hashed_password=pwd_context.hash(_TEST_PASSWORD),
         role="user",
     )
     db_session.add(user)
@@ -102,12 +105,12 @@ async def auth_headers(client: AsyncClient) -> dict[str, str]:
         json={
             "username": "authuser",
             "email": "authuser@example.com",
-            "password": "password123",
+            "password": _TEST_PASSWORD,
         },
     )
     response = await client.post(
         "/auth/login",
-        json={"username": "authuser", "password": "password123"},
+        json={"username": "authuser", "password": _TEST_PASSWORD},
     )
     response.raise_for_status()
     token = response.json()["access_token"]

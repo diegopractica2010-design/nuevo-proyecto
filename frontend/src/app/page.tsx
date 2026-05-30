@@ -1,6 +1,7 @@
 import dynamic from "next/dynamic";
 import { AppLayout } from "@/layouts/app-layout";
 import { SearchDashboard } from "@/features/search/components/search-dashboard";
+import { AsyncBoundary } from "@/components/async-boundary";
 
 const ShoppingListWorkbench = dynamic(
   () =>
@@ -14,8 +15,12 @@ export default function Home() {
   return (
     <AppLayout>
       <div className="space-y-12">
-        <SearchDashboard />
-        <ShoppingListWorkbench />
+        <AsyncBoundary>
+          <SearchDashboard />
+        </AsyncBoundary>
+        <AsyncBoundary>
+          <ShoppingListWorkbench />
+        </AsyncBoundary>
       </div>
     </AppLayout>
   );

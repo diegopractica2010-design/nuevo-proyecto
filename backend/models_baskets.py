@@ -30,6 +30,14 @@ class BasketSummary(BaseModel):
     created_at: datetime
 
 
+class PaginatedBaskets(BaseModel):
+    items: list[BasketSummary]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+
+
 class PriceHistory(BaseModel):
     product_id: str
     store: str

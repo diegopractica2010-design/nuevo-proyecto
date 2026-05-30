@@ -51,19 +51,35 @@ export function SearchDashboard() {
   const pushRecentQuery = useAppStore((s) => s.pushRecentQuery);
   const recentQueries = useAppStore((s) => s.recentQueries);
 
-  const [draft, setDraft]           = useState("");
-  const [query, setQuery]           = useState("");
-  const [sortOrder, setSortOrder]   = useState<SortOrder>("default");
+  const [draft, setDraft]             = useState("");
+  const [query, setQuery]             = useState("");
+  const [sortOrder, setSortOrder]     = useState<SortOrder>("default");
   const [brandFilter, setBrandFilter] = useState<string | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [priceRange, setPriceRange]   = useState<[number, number] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const placeholder = useCyclingPlaceholder(PLACEHOLDERS);
   const search = useSearchProducts(query, activeStore);
+
+  const facetPriceMin = search.data?.facets.price_range.min ?? null;
+  const facetPriceMax = search.data?.facets.price_range.max ?? null;
 
   // Reset controls when query or store changes
   useEffect(() => {
     setSortOrder("default");
     setBrandFilter(null);
+    setCategoryFilter(null);
+    setPriceRange(null);
   }, [query, activeStore]);
+
+  const activeFilterCount =
+    (brandFilter ? 1 : 0) + (categoryFilter ? 1 : 0) + (priceRange ? 1 : 0);
+
+  function clearAllFilters() {
+    setBrandFilter(null);
+    setCategoryFilter(null);
+    setPriceRange(null);
+  }
 
   function fire(q: string) {
     const trimmed = q.trim();
@@ -80,15 +96,17 @@ export function SearchDashboard() {
 
   const allProducts  = search.data?.results ?? [];
   const brands       = search.data?.facets.brands ?? [];
+  const categories   = search.data?.facets.categories ?? [];
 
   const filteredSorted = useMemo(() => {
-    let list = brandFilter
-      ? allProducts.filter((p) => p.brand === brandFilter)
-      : allProducts;
+    let list = allProducts;
+    if (brandFilter) list = list.filter((p) => p.brand === brandFilter);
+    if (categoryFilter) list = list.filter((p) => p.category === categoryFilter);
+    if (priceRange) list = list.filter((p) => p.price >= priceRange[0] && p.price <= priceRange[1]);
     if (sortOrder === "asc")  list = [...list].sort((a, b) => a.price - b.price);
     if (sortOrder === "desc") list = [...list].sort((a, b) => b.price - a.price);
     return list;
-  }, [allProducts, sortOrder, brandFilter]);
+  }, [allProducts, sortOrder, brandFilter, categoryFilter, priceRange]);
 
   const hasResults = !!search.data && search.data.count > 0;
 
@@ -110,6 +128,7 @@ export function SearchDashboard() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35, delay: 0.06 }}
           onSubmit={onSubmit}
+          role="search"
           className="relative w-full max-w-xl"
         >
           <input
@@ -117,6 +136,7 @@ export function SearchDashboard() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={placeholder}
+            aria-label="Buscar productos"
             className={cn(
               "h-14 w-full rounded-xl border border-border bg-background px-5 pr-24",
               "text-[15px] shadow-sm outline-none ring-0",
@@ -197,7 +217,7 @@ export function SearchDashboard() {
             {/* Result count + controls bar */}
             {hasResults && (
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-muted-foreground" aria-live="polite" aria-atomic="true">
                   <span className="font-medium text-foreground">{search.data!.count}</span>{" "}
                   resultados para &ldquo;{query}&rdquo;
                   {search.data?.strategy ? (
@@ -250,34 +270,103 @@ export function SearchDashboard() {
               </div>
             )}
 
-            {/* Brand filter chips */}
-            {hasResults && brands.length > 1 && (
-              <div className="flex flex-wrap gap-1.5">
-                {brandFilter && (
-                  <button
-                    type="button"
-                    onClick={() => setBrandFilter(null)}
-                    className="rounded-full border border-primary bg-primary/10 px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
-                  >
-                    ✕ {brandFilter}
-                  </button>
-                )}
-                {brands.slice(0, 8).map(({ name, count }) =>
-                  name && name !== brandFilter ? (
+            {/* Filters bar */}
+            {hasResults && (
+              <div className="space-y-2">
+                {/* Active filter count + clear all */}
+                {activeFilterCount > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
+                      {activeFilterCount} filtro{activeFilterCount > 1 ? "s" : ""}
+                    </span>
                     <button
-                      key={name}
                       type="button"
-                      onClick={() => setBrandFilter(name)}
-                      className={cn(
-                        "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                        "border-border bg-background text-muted-foreground",
-                        "hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
-                      )}
+                      onClick={clearAllFilters}
+                      className="text-xs text-muted-foreground hover:text-foreground"
                     >
-                      {name}
-                      <span className="ml-1 text-[10px] opacity-60">{count}</span>
+                      Limpiar todo
                     </button>
-                  ) : null
+                  </div>
+                )}
+
+                {/* Brand chips */}
+                {brands.length > 1 && (
+                  <div role="group" aria-label="Filtrar por marca" className="flex flex-wrap gap-1.5">
+                    {brandFilter && (
+                      <button type="button" onClick={() => setBrandFilter(null)}
+                        aria-pressed="true"
+                        className="rounded-full border border-primary bg-primary/10 px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/20">
+                        ✕ {brandFilter}
+                      </button>
+                    )}
+                    {brands.slice(0, 8).map(({ name, count }) =>
+                      name && name !== brandFilter ? (
+                        <button key={name} type="button" onClick={() => setBrandFilter(name)}
+                          aria-pressed="false"
+                          className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                            "border-border bg-background text-muted-foreground",
+                            "hover:border-primary/40 hover:bg-primary/5 hover:text-primary")}>
+                          {name}<span className="ml-1 text-[10px] opacity-60">{count}</span>
+                        </button>
+                      ) : null
+                    )}
+                  </div>
+                )}
+
+                {/* Category chips */}
+                {categories.length > 1 && (
+                  <div role="group" aria-label="Filtrar por categoría" className="flex flex-wrap gap-1.5">
+                    {categoryFilter && (
+                      <button type="button" onClick={() => setCategoryFilter(null)}
+                        aria-pressed="true"
+                        className="rounded-full border border-secondary bg-secondary/10 px-3 py-1 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/20">
+                        ✕ {categoryFilter}
+                      </button>
+                    )}
+                    {categories.slice(0, 6).map(({ name, count }) =>
+                      name && name !== categoryFilter ? (
+                        <button key={name} type="button" onClick={() => setCategoryFilter(name)}
+                          aria-pressed="false"
+                          className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                            "border-border/60 bg-muted text-muted-foreground",
+                            "hover:border-secondary/40 hover:bg-secondary/5 hover:text-secondary-foreground")}>
+                          {name}<span className="ml-1 text-[10px] opacity-60">{count}</span>
+                        </button>
+                      ) : null
+                    )}
+                  </div>
+                )}
+
+                {/* Price range */}
+                {facetPriceMin != null && facetPriceMax != null && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>Precio:</span>
+                    <input
+                      type="number"
+                      placeholder={`Mín ($${facetPriceMin.toLocaleString("es-CL")})`}
+                      className="w-28 rounded-md border border-border bg-background px-2 py-1 text-xs"
+                      value={priceRange ? priceRange[0] : ""}
+                      onChange={(e) => {
+                        const min = Number(e.target.value) || facetPriceMin;
+                        setPriceRange([min, priceRange ? priceRange[1] : facetPriceMax]);
+                      }}
+                    />
+                    <span>—</span>
+                    <input
+                      type="number"
+                      placeholder={`Máx ($${facetPriceMax.toLocaleString("es-CL")})`}
+                      className="w-28 rounded-md border border-border bg-background px-2 py-1 text-xs"
+                      value={priceRange ? priceRange[1] : ""}
+                      onChange={(e) => {
+                        const max = Number(e.target.value) || facetPriceMax;
+                        setPriceRange([priceRange ? priceRange[0] : facetPriceMin, max]);
+                      }}
+                    />
+                    {priceRange && (
+                      <button type="button" onClick={() => setPriceRange(null)}
+                        className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                    )}
+                  </div>
                 )}
               </div>
             )}

@@ -4,6 +4,11 @@ export interface StoreInfo {
   id: string;
   display_name: string;
   experimental: boolean;
+  url?: string;
+  logo_url?: string;
+  description?: string;
+  country?: string;
+  currency?: string;
 }
 
 export interface Product {

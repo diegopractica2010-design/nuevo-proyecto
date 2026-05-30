@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Write",
+      "Bash(mkdir *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(New-Item *)",
+      "Bash(Copy-Item *)",
+      "Bash(Move-Item *)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(npx *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(pytest *)",
+      "Bash(ls *)",
+      "Bash(dir *)",
+      "Bash(cat *)",
+      "Bash(type *)",
+      "Bash(cd * && pytest *)",
+      "Bash(cd * && npm *)",
+      "Bash(cd * && python *)"
+    ]
+  }
+}

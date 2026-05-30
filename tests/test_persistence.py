@@ -89,13 +89,13 @@ class PersistenceTests(unittest.TestCase):
         )
 
         loaded = BasketService.get_basket(basket.id)
-        summaries = BasketService.get_user_baskets("paula")
+        paginated = BasketService.get_user_baskets("paula")
 
         self.assertTrue(added)
         self.assertIsNotNone(loaded)
         self.assertEqual(len(loaded.items), 1)
         self.assertEqual(loaded.items[0].quantity, 2)
-        self.assertEqual(summaries[0].total_price, 2000)
+        self.assertEqual(paginated.items[0].total_price, 2000)
 
     def test_price_history_is_persisted_and_deduplicates_small_changes(self):
         PriceHistoryService.record_price("sku-1", "lider", 1000, "https://example.com/1")

@@ -12,6 +12,8 @@ from fastapi import Request
 
 from backend.config import REDIS_URL, RATE_LIMIT_REQUESTS_PER_MINUTE, RATE_LIMIT_WINDOW_SECONDS
 
+AUTH_RATE_LIMIT_RPM: int = int(os.getenv("AUTH_RATE_LIMIT_REQUESTS_PER_MINUTE", "120"))
+
 logger = logging.getLogger(__name__)
 
 _TRUSTED_PROXIES: frozenset[str] = frozenset(
@@ -66,6 +68,37 @@ class RateLimiter:
                 return forwarded_for.split(",")[0].strip()
         return client_ip
     
+    def _extract_username(self, request: Request) -> Optional[str]:
+        """Try to extract username from Bearer token without full verification."""
+        auth = request.headers.get("authorization", "")
+        if not auth.startswith("Bearer "):
+            return None
+        token = auth[7:]
+        try:
+            from backend.auth import TokenService
+            return TokenService.verify_token(token)
+        except Exception:
+            return None
+
+    def _check_limit(self, key: str, rpm: int) -> tuple[bool, dict]:
+        """Internal sliding window check against a Redis key."""
+        if not self.redis_client:
+            return False, {"allowed": True, "reason": "redis_unavailable"}
+        now = time.time()
+        window_start = now - self.window_seconds
+        pipe = self.redis_client.pipeline()
+        pipe.zremrangebyscore(key, 0, window_start)
+        pipe.zcard(key)
+        pipe.zadd(key, {str(now): now})
+        pipe.expire(key, self.window_seconds + 1)
+        results = pipe.execute()
+        count = results[1]
+        if count >= rpm:
+            oldest = self.redis_client.zrange(key, 0, 0, withscores=True)
+            retry_after = int((oldest[0][1] + self.window_seconds - now)) if oldest else 1
+            return True, {"allowed": False, "limit": rpm, "window": self.window_seconds, "retry_after": max(1, retry_after)}
+        return False, {"allowed": True, "limit": rpm, "remaining": rpm - count - 1}
+
     def is_rate_limited(self, request: Request) -> tuple[bool, dict]:
         """
         Check if request is rate limited.
@@ -74,60 +107,21 @@ class RateLimiter:
             (is_limited, metadata) tuple
             where metadata contains: {allowed, limit, window, retry_after}
         """
-        if not self.redis_client:
-            # Redis unavailable: allow request (graceful degradation)
-            return False, {"allowed": True, "reason": "redis_unavailable"}
-        
         try:
+            username = self._extract_username(request)
+            if username:
+                key = f"rl:user:{username}"
+                limited, meta = self._check_limit(key, AUTH_RATE_LIMIT_RPM)
+                if limited:
+                    logger.warning("Auth rate limit exceeded for user=%s", username)
+                return limited, meta
             client_ip = self._get_ip(request)
-            key = self._get_client_key(client_ip)
-            now = time.time()
-            window_start = now - self.window_seconds
-            
-            # Use Redis pipeline for atomic operations
-            pipe = self.redis_client.pipeline()
-            
-            # Remove old entries outside the window
-            pipe.zremrangebyscore(key, 0, window_start)
-            
-            # Count requests in current window
-            pipe.zcard(key)
-            
-            # Add current request timestamp
-            pipe.zadd(key, {str(now): now})
-            
-            # Set expiry (cleanup old keys)
-            pipe.expire(key, self.window_seconds + 1)
-            
-            results = pipe.execute()
-            request_count = results[1]  # Count after cleanup but before adding current
-            
-            # Check if limit exceeded
-            if request_count >= self.requests_per_minute:
-                # Get oldest request time to calculate retry_after
-                oldest = self.redis_client.zrange(key, 0, 0, withscores=True)
-                retry_after = int((oldest[0][1] + self.window_seconds - now)) if oldest else 1
-                
-                logger.warning(
-                    f"Rate limit exceeded for {client_ip}: "
-                    f"{request_count}/{self.requests_per_minute} requests in {self.window_seconds}s"
-                )
-                
-                return True, {
-                    "allowed": False,
-                    "limit": self.requests_per_minute,
-                    "window": self.window_seconds,
-                    "retry_after": max(1, retry_after),
-                    "ip": client_ip,
-                }
-            
-            # Request allowed
-            return False, {
-                "allowed": True,
-                "limit": self.requests_per_minute,
-                "remaining": self.requests_per_minute - request_count - 1,
-            }
-        
+            key = f"rl:ip:{client_ip}"
+            limited, meta = self._check_limit(key, self.requests_per_minute)
+            if limited:
+                logger.warning("IP rate limit exceeded for ip=%s", client_ip)
+                meta["ip"] = client_ip
+            return limited, meta
         except Exception as e:
             logger.error(f"Rate limiter error: {e}. Allowing request (graceful degradation).")
             return False, {"allowed": True, "reason": "rate_limiter_error"}

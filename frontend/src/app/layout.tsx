@@ -3,8 +3,16 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "Radar de Precios",
-  description: "Compara precios reales de Lider y Jumbo antes de ir al supermercado.",
+  title: { default: "Radar de Precios", template: "%s | Radar de Precios" },
+  description: "Compara precios en Lider, Jumbo y más supermercados chilenos en tiempo real.",
+  keywords: ["precios supermercados", "comparador precios chile", "lider", "jumbo", "santa isabel"],
+  openGraph: {
+    type: "website",
+    locale: "es_CL",
+    siteName: "Radar de Precios",
+    images: ["/og-image.png"],
+  },
+  robots: { index: true, follow: true },
 };
 
 export const viewport: Viewport = {

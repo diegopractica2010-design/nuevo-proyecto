@@ -106,11 +106,11 @@ class APITests(unittest.TestCase):
     def test_authenticated_baskets_are_scoped_to_current_user(self):
         self.client.post(
             "/auth/register",
-            json={"username": "paula", "email": "paula@example.com", "password": "password123"},
+            json={"username": "paula", "email": "paula@example.com", "password": "Test@Secure1234!"},
         )
         login = self.client.post(
             "/auth/login",
-            json={"username": "paula", "password": "password123"},
+            json={"username": "paula", "password": "Test@Secure1234!"},
         )
         token = login.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -121,7 +121,7 @@ class APITests(unittest.TestCase):
 
         listed = self.client.get("/baskets", headers=headers)
         self.assertEqual(listed.status_code, 200)
-        self.assertEqual(len(listed.json()), 1)
+        self.assertEqual(len(listed.json()["items"]), 1)
 
     def test_basket_item_quantity_endpoint(self):
         basket = self.client.post("/baskets", json={"name": "Semana"}).json()

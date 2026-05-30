@@ -9,6 +9,9 @@ import {
 } from "lucide-react";
 import { AppLayout } from "@/layouts/app-layout";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 import { apiClient } from "@/services/api-client";
 import { useAppStore } from "@/stores/use-app-store";
 import { formatCurrency, cn } from "@/lib/utils";
@@ -18,6 +21,7 @@ import type { Basket, BasketSummary } from "@/types/api";
 
 function BasketRow({ summary }: { summary: BasketSummary }) {
   const [open, setOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const qc = useQueryClient();
   const { data: basket } = useQuery<Basket>({
     queryKey: ["basket", summary.id],
@@ -28,6 +32,19 @@ function BasketRow({ summary }: { summary: BasketSummary }) {
   const updateQty = useMutation({
     mutationFn: ({ productId, qty }: { productId: string; qty: number }) =>
       apiClient.updateBasketItem(summary.id, productId, qty),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["basket", summary.id] }),
+  });
+
+  const deleteBasket = useMutation({
+    mutationFn: () => apiClient.deleteBasket(summary.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["baskets"] });
+      setConfirmDelete(false);
+    },
+  });
+
+  const deleteItem = useMutation({
+    mutationFn: (productId: string) => apiClient.deleteBasketItem(summary.id, productId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["basket", summary.id] }),
   });
 
@@ -51,10 +68,18 @@ function BasketRow({ summary }: { summary: BasketSummary }) {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-primary">
             {formatCurrency(runningTotal)}
           </span>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setConfirmDelete(true); }}
+            aria-label={`Eliminar cesta ${summary.name}`}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
           {open ? (
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           ) : (
@@ -62,6 +87,28 @@ function BasketRow({ summary }: { summary: BasketSummary }) {
           )}
         </div>
       </button>
+
+      {/* Confirm delete dialog */}
+      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿Eliminar cesta?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            ¿Seguro que quieres eliminar &ldquo;{summary.name}&rdquo;? Esta acción no se puede deshacer.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setConfirmDelete(false)}>Cancelar</Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteBasket.mutate()}
+              disabled={deleteBasket.isPending}
+            >
+              {deleteBasket.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Eliminar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Detail */}
       <AnimatePresence>
@@ -128,6 +175,14 @@ function BasketRow({ summary }: { summary: BasketSummary }) {
                       <p className="w-20 text-right text-sm font-semibold text-foreground">
                         {formatCurrency(item.price * item.quantity)}
                       </p>
+                      <button
+                        onClick={() => deleteItem.mutate(item.product_id)}
+                        disabled={deleteItem.isPending}
+                        aria-label={`Eliminar ${item.name}`}
+                        className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
                     </div>
                   ))}
 
@@ -158,11 +213,13 @@ export default function BasketsPage() {
     if (!authToken) router.push("/");
   }, [authToken, router]);
 
-  const { data: baskets, isLoading } = useQuery<BasketSummary[]>({
-    queryKey: ["baskets"],
-    queryFn: () => apiClient.getBaskets(),
+  const [offset, setOffset] = useState(0);
+  const { data: basketsPage, isLoading } = useQuery({
+    queryKey: ["baskets", offset],
+    queryFn: () => apiClient.getBaskets(20, offset),
     enabled: !!authToken,
   });
+  const baskets = basketsPage?.items ?? [];
 
   if (!authToken) return null;
 
@@ -195,6 +252,13 @@ export default function BasketsPage() {
             {baskets.map((b) => (
               <BasketRow key={b.id} summary={b} />
             ))}
+            {basketsPage?.has_more && (
+              <div className="flex justify-center pt-2">
+                <Button variant="outline" size="sm" onClick={() => setOffset((o) => o + 20)}>
+                  Cargar más
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>

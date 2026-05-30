@@ -1,6 +1,8 @@
 # ============================================================================
 # ENVIRONMENT & SECRETS (FASE 4 - CRÍTICO)
 # ============================================================================
+# Explicitly track .secrets.baseline (it must be committed for CI to work)
+!.secrets.baseline
 .env
 .env.local
 .env.*.local

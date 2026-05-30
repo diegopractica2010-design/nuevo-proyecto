@@ -123,6 +123,7 @@ class UserRecord(Base):
         nullable=False,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     role: Mapped[str] = mapped_column(String(20), default="user", nullable=False, server_default="user")
 
 

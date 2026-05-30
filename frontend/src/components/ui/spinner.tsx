@@ -15,8 +15,15 @@ const Spinner = React.forwardRef<
   };
 
   return (
-    <div ref={ref} className={cn("flex items-center justify-center", className)} {...props}>
+    <div
+      ref={ref}
+      role="status"
+      aria-label="Cargando"
+      className={cn("flex items-center justify-center", className)}
+      {...props}
+    >
       <Loader className={cn("animate-spin", sizeClasses[size])} />
+      <span className="sr-only">Cargando…</span>
     </div>
   );
 });

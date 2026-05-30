@@ -2,6 +2,24 @@ from pydantic import BaseModel, field_validator
 import re
 from typing import Any
 
+_SPECIAL_CHARS = r"!@#$%^&*()_+\-=\[\]{}|;:,.<>?"
+
+
+def validate_password_strength(v: str) -> list[str]:
+    """Return list of unmet password requirements (empty = valid)."""
+    failures: list[str] = []
+    if len(v) < 12:
+        failures.append("mínimo 12 caracteres")
+    if len(v) > 128:
+        failures.append("máximo 128 caracteres")
+    if not re.search(r"[A-Z]", v):
+        failures.append("al menos 1 letra mayúscula [A-Z]")
+    if not re.search(r"[0-9]", v):
+        failures.append("al menos 1 dígito [0-9]")
+    if not re.search(rf"[{_SPECIAL_CHARS}]", v):
+        failures.append(r"al menos 1 carácter especial (!@#$%^&*()_+-=[]{}|;:,.<>?)")
+    return failures
+
 
 class EmailStr(str):
     """Email validation type."""
@@ -48,10 +66,9 @@ class UserCreate(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password debe tener al menos 8 caracteres")
-        if len(v) > 100:
-            raise ValueError("Password no puede exceder 100 caracteres")
+        failures = validate_password_strength(v)
+        if failures:
+            raise ValueError("; ".join(failures))
         return v
 
 

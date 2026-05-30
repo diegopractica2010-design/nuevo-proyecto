@@ -50,6 +50,9 @@ class LiderScraper(BaseScraper):
     """
     Unified Scraper de Lider.cl con soporte para múltiples estrategias.
 
+    Subclasses may override SEARCH_URL_TEMPLATE, SLUG_URL_TEMPLATE, and STORE_NAME
+    to reuse all parsing logic for other Walmart-family stores (e.g. Acuenta).
+
     Estrategias de fetching:
     1. GraphQL API (getSearch, getSearchPage)
     2. HTML catalog pages con múltiples header profiles
@@ -64,6 +67,16 @@ class LiderScraper(BaseScraper):
     - Autocomplete para sugerencias
     - Query variants (stopwords, ngrams)
     """
+
+    SEARCH_URL_TEMPLATE: str | None = None  # None → use config.SEARCH_URL
+    SLUG_URL_TEMPLATE: str | None = None    # None → use config.SLUG_URL
+    STORE_NAME: str = "lider"
+
+    def _get_search_url(self) -> str:
+        return self.SEARCH_URL_TEMPLATE or SEARCH_URL
+
+    def _get_slug_url(self) -> str:
+        return self.SLUG_URL_TEMPLATE or SLUG_URL
 
     async def search(self, query: str, limit: int = 100) -> ScrapedSearchResult:
         """Ejecuta búsqueda y retorna ScrapedSearchResult con toda la metadata."""
@@ -292,8 +305,8 @@ class LiderScraper(BaseScraper):
     def _candidate_pages(self, query: str, page: int = 1) -> list[tuple[str, str, dict[str, str]]]:
         """Genera lista de URLs y headers candidates para búsqueda."""
         slug = _slugify_query(query)
-        search_url = _with_page(SEARCH_URL.format(query=quote_plus(query)), page)
-        slug_url = SLUG_URL.format(slug=slug)
+        search_url = _with_page(self._get_search_url().format(query=quote_plus(query)), page)
+        slug_url = self._get_slug_url().format(slug=slug)
 
         candidates: list[tuple[str, str, dict[str, str]]] = []
         for profile_name, headers in HTML_HEADER_PROFILES:

@@ -1,7 +1,7 @@
 import logging
 import signal
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
@@ -23,8 +23,8 @@ from backend.health_check import get_health_checker
 from backend.models import SearchResponse
 from backend.search_service import SearchServiceError, _persist_prices, search_products
 from backend.basket_service import BasketService, PriceHistoryService
-from backend.models_baskets import Basket, BasketSummary
-from backend.auth import AuthService, TokenService, require_admin
+from backend.models_baskets import Basket, BasketSummary, PaginatedBaskets
+from backend.auth import ACCESS_TOKEN_EXPIRE_MINUTES, AuthService, TokenService, pwd_context, require_admin, revoke_token, send_verification_email
 from backend.models_auth import Token, UserCreate, UserLogin, UserResponse
 
 # FASE 4: Import new modules
@@ -237,7 +237,16 @@ def scraper_health():
 def get_stores():
     from backend.store_adapters import list_stores
     return [
-        {"id": s.name, "display_name": s.display_name, "experimental": s.experimental}
+        {
+            "id": s.name,
+            "display_name": s.display_name,
+            "experimental": s.experimental,
+            "url": s.url,
+            "logo_url": s.logo_url,
+            "description": s.description,
+            "country": s.country,
+            "currency": s.currency,
+        }
         for s in list_stores()
     ]
 
@@ -307,12 +316,15 @@ def create_basket(
     return basket
 
 
-@app.get("/baskets", response_model=list[BasketSummary])
-def get_baskets(authorization: str = Header(...)):
+@app.get("/baskets", response_model=PaginatedBaskets)
+def get_baskets(
+    authorization: str = Header(...),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
     username = _username_from_authorization(authorization, required=True)
-    owner_id = username
-    logger.info(f"Getting baskets for user: {owner_id}")
-    return BasketService.get_user_baskets(owner_id)
+    logger.info(f"Getting baskets for user: {username}")
+    return BasketService.get_user_baskets(username, limit=limit, offset=offset)
 
 
 @app.get("/baskets/{basket_id}", response_model=Basket)
@@ -511,13 +523,38 @@ def monitoring_celery_debug():
 
 # Endpoints de autenticación
 @app.post("/auth/register", response_model=UserResponse)
-def register(user: UserCreate):
+def register(background: BackgroundTasks, user: UserCreate):
     logger.info(f"Registering user: {user.username}")
     try:
         db_user = AuthService.create_user(user.username, user.email, user.password)
+        verify_token = TokenService.create_access_token(
+            data={"sub": user.username, "purpose": "email_verify"},
+            expires_delta=timedelta(hours=24),
+        )
+        background.add_task(send_verification_email, user.username, user.email, verify_token)
         return UserResponse(username=db_user.username, email=db_user.email)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/auth/verify")
+def verify_email(token: str = Query(...)):
+    """Verify email address via signed JWT link."""
+    from backend.db import SessionLocal
+    from backend.repositories import UserRepository
+    payload = TokenService.decode_payload(token)
+    if not payload or payload.get("purpose") != "email_verify":
+        raise HTTPException(status_code=400, detail="Token de verificación inválido o expirado")
+    username = payload.get("sub")
+    if not username:
+        raise HTTPException(status_code=400, detail="Token inválido")
+    with SessionLocal() as session:
+        user = UserRepository(session).get_by_username(username)
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        user.is_verified = True
+        session.commit()
+    return {"detail": "Email verificado correctamente. Ya puedes iniciar sesión."}
 
 
 @app.post("/auth/login", response_model=Token)
@@ -539,6 +576,22 @@ def get_current_user(authorization: str = Header(None, description="JWT token (B
     return UserResponse(username=user.username, email=user.email)
 
 
+@app.post("/auth/logout")
+def logout(authorization: str = Header(..., description="Bearer JWT")):
+    """Revoke the current token so it cannot be reused after logout."""
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+    token = authorization[7:]
+    payload = TokenService.decode_payload(token)
+    if payload:
+        jti = payload.get("jti", "")
+        exp = payload.get("exp", 0)
+        if jti:
+            remaining_ttl = max(int(exp - datetime.now(UTC).timestamp()), 0)
+            revoke_token(jti, remaining_ttl or ACCESS_TOKEN_EXPIRE_MINUTES * 60)
+    return {"detail": "Logged out successfully"}
+
+
 @app.post("/auth/refresh", response_model=Token)
 def refresh_token(authorization: str = Header(None, description="JWT token (Bearer)")):
     """Refresh JWT token: accepts a valid Bearer token, returns a new one with reset TTL."""
@@ -557,6 +610,70 @@ def refresh_token(authorization: str = Header(None, description="JWT token (Bear
     logger.info(f"Token refreshed for user: {username}")
     
     return Token(access_token=new_token, token_type="bearer")
+
+
+@app.post("/auth/forgot-password")
+def forgot_password(background: BackgroundTasks, body: dict = Body(...)):
+    """Send a password reset link to the user's email."""
+    import hashlib
+    from backend.db import SessionLocal
+    from backend.repositories import UserRepository
+    email = (body.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=422, detail="email es requerido")
+    with SessionLocal() as session:
+        user = UserRepository(session).get_by_email(email)
+    if user:
+        reset_token = TokenService.create_access_token(
+            data={"sub": user.username, "purpose": "pwd_reset"},
+            expires_delta=timedelta(hours=1),
+        )
+        token_hash = hashlib.sha256(reset_token.encode()).hexdigest()
+        try:
+            from backend.infrastructure.cache.cache import _get_client
+            _get_client().set(f"pwd_reset:{user.username}", token_hash, ex=3600)
+        except Exception as exc:
+            logger.warning("Could not store pwd_reset in Redis: %s", exc)
+        background.add_task(send_verification_email, user.username, email, reset_token)
+    return {"detail": "Si ese email existe, recibirás un enlace de restablecimiento."}
+
+
+@app.post("/auth/reset-password")
+def reset_password(body: dict = Body(...)):
+    """Reset the user's password using a valid reset token."""
+    import hashlib
+    from backend.db import SessionLocal
+    from backend.repositories import UserRepository
+    from backend.models_auth import validate_password_strength
+    token = body.get("token", "")
+    new_password = body.get("new_password", "")
+    if not token or not new_password:
+        raise HTTPException(status_code=422, detail="token y new_password son requeridos")
+    failures = validate_password_strength(new_password)
+    if failures:
+        raise HTTPException(status_code=422, detail="; ".join(failures))
+    payload = TokenService.decode_payload(token)
+    if not payload or payload.get("purpose") != "pwd_reset":
+        raise HTTPException(status_code=400, detail="Token inválido o expirado")
+    username = payload.get("sub")
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    try:
+        from backend.infrastructure.cache.cache import _get_client
+        stored = _get_client().get(f"pwd_reset:{username}")
+        if not stored or stored != token_hash:
+            raise HTTPException(status_code=400, detail="Token ya utilizado o expirado")
+        _get_client().delete(f"pwd_reset:{username}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Redis check failed for pwd_reset: %s", exc)
+    with SessionLocal() as session:
+        user = UserRepository(session).get_by_username(username)
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        user.hashed_password = pwd_context.hash(new_password)
+        session.commit()
+    return {"detail": "Contraseña actualizada. Por favor inicia sesión."}
 
 
 # ============================================================================
@@ -631,21 +748,45 @@ def backup_status(username: str = Depends(require_admin)):
 
 
 @app.post("/admin/promote", include_in_schema=False)
-def promote_user(username: str = Query(..., description="Username to promote to admin")):
+def promote_user(
+    body: dict = Body(...),
+    _admin: str = Depends(require_admin),
+):
+    """Promote a user to a given role (admin only). Body: {username, role}."""
+    from backend.db import SessionLocal
+    from backend.repositories import UserRepository
+    username = body.get("username", "").strip()
+    role = body.get("role", "admin").strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="username es requerido")
+    if role not in ("admin", "user"):
+        raise HTTPException(status_code=422, detail="role debe ser 'admin' o 'user'")
+    with SessionLocal() as session:
+        repo = UserRepository(session)
+        user = repo.get_by_username(username)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        user.role = role
+        session.commit()
+    logger.info("User '%s' promoted to role='%s' by admin", username, role)
+    return {"status": "success", "username": username, "role": role}
+
+
+@app.post("/admin/promote-bootstrap", include_in_schema=False)
+def promote_user_bootstrap(username: str = Query(...)):
     """Bootstrap endpoint: promote a user to admin. Only works when no admins exist."""
     from backend.db import SessionLocal
     from backend.repositories import UserRepository
     with SessionLocal() as session:
         repo = UserRepository(session)
-        admin_count = repo.count_admins()
-        if admin_count > 0:
-            raise HTTPException(status_code=403, detail="Bootstrap endpoint disabled: admins already exist")
+        if repo.count_admins() > 0:
+            raise HTTPException(status_code=403, detail="Bootstrap disabled: admins already exist")
         user = repo.get_by_username(username)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         user.role = "admin"
         session.commit()
-    logger.info(f"User '{username}' promoted to admin via bootstrap endpoint")
+    logger.info("Bootstrap: user '%s' promoted to admin", username)
     return {"status": "success", "username": username, "role": "admin"}
 
 

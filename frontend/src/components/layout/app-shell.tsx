@@ -129,13 +129,22 @@ function StoreTabs() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const authUsername = useAppStore((s) => s.authUsername);
+  const authToken = useAppStore((s) => s.authToken);
   const logout = useAppStore((s) => s.logout);
   const cartCount = useAppStore((s) => s.cartCount);
+
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => apiClient.getMe(),
+    enabled: !!authToken,
+    staleTime: 300_000,
+  });
+  const isAdmin = (me as (typeof me & { role?: string }) | undefined)?.role === "admin";
 
   return (
     <div className="flex min-h-screen flex-col">
       {/* ── Header ── */}
-      <header className="sticky top-0 z-40 border-b border-border/60 bg-background/90 backdrop-blur-xl">
+      <header role="banner" className="sticky top-0 z-40 border-b border-border/60 bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3 sm:px-6">
           <RadarWordmark />
 
@@ -160,9 +169,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             {authUsername ? (
               <div className="flex items-center gap-2">
-                <span className="hidden max-w-[100px] truncate text-xs text-muted-foreground sm:inline">
+                {isAdmin && (
+                  <Link
+                    href="/admin"
+                    className="hidden text-xs text-muted-foreground hover:text-foreground sm:inline"
+                  >
+                    Admin
+                  </Link>
+                )}
+                <Link
+                  href="/profile"
+                  className="hidden max-w-[100px] truncate text-xs text-muted-foreground hover:text-foreground sm:inline"
+                >
                   {authUsername}
-                </span>
+                </Link>
                 <button
                   onClick={logout}
                   aria-label="Cerrar sesión"
@@ -185,7 +205,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* ── Content ── */}
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6">
+      <main role="main" className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6">
         {children}
       </main>
 

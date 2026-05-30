@@ -46,15 +46,35 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = (
         [origin.strip() for origin in _CORS_ENV.split(",") if origin.strip()]
         if _CORS_ENV
-        else [
-            "http://localhost:3000",
-            "http://localhost:8000",
-            "http://localhost:8001",
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:8000",
-            "http://127.0.0.1:8001",
-        ]
+        else (
+            []  # no origins allowed in production without explicit CORS_ORIGINS
+            if os.getenv("ENVIRONMENT", "development") == "production"
+            else [
+                "http://localhost:3000",
+                "http://localhost:8000",
+                "http://localhost:8001",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:8000",
+                "http://127.0.0.1:8001",
+            ]
+        )
     )
+
+    @field_validator("CORS_ORIGINS", mode="after")
+    @classmethod
+    def validate_cors(cls, v: list[str]) -> list[str]:
+        env = os.getenv("ENVIRONMENT", "development")
+        if env == "production" and not v:
+            raise ValueError(
+                "CORS_ORIGINS must be set in production. "
+                "Add CORS_ORIGINS=https://yourdomain.com to your environment."
+            )
+        if "*" in v:
+            raise ValueError(
+                "Wildcard '*' in CORS_ORIGINS is not allowed with allow_credentials=True. "
+                "Specify explicit origins instead."
+            )
+        return v
     
     # Search & Scraping
     SEARCH_URL: str = "https://super.lider.cl/search?q={query}"
@@ -94,6 +114,10 @@ class Settings(BaseSettings):
     BACKUP_INTERVAL_HOURS: int = int(os.getenv("BACKUP_INTERVAL_HOURS", "24"))
     BACKUP_PATH: str = os.getenv("BACKUP_PATH", "./data/backups")
     
+    # Optional headless browser (required for Unimarc/Tottus HTML fallback)
+    # pip install playwright && playwright install chromium
+    PLAYWRIGHT_ENABLED: bool = os.getenv("PLAYWRIGHT_ENABLED", "false").lower() == "true"
+
     # FASE 4: Prometheus Metrics
     PROMETHEUS_ENABLED: bool = os.getenv("PROMETHEUS_ENABLED", "true").lower() == "true"
     PROMETHEUS_PORT: int = int(os.getenv("PROMETHEUS_PORT", "9090"))
@@ -271,6 +295,7 @@ BROWSER_HEADERS = settings.BROWSER_HEADERS
 BACKUP_ENABLED = settings.BACKUP_ENABLED
 BACKUP_INTERVAL_HOURS = settings.BACKUP_INTERVAL_HOURS
 BACKUP_PATH = settings.BACKUP_PATH
+PLAYWRIGHT_ENABLED = settings.PLAYWRIGHT_ENABLED
 PROMETHEUS_ENABLED = settings.PROMETHEUS_ENABLED
 PROMETHEUS_PORT = settings.PROMETHEUS_PORT
 PROMETHEUS_RETENTION_SECONDS = settings.PROMETHEUS_RETENTION_SECONDS

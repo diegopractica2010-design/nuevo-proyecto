@@ -29,6 +29,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(payload?.detail ?? `Request failed with ${response.status}`);
   }
 
+  // 204 No Content or empty body — skip JSON parsing
+  const contentLength = response.headers.get("content-length");
+  if (response.status === 204 || contentLength === "0") {
+    return undefined as T;
+  }
+
   return response.json() as Promise<T>;
 }
 
@@ -78,8 +84,9 @@ export const apiClient = {
     return request<StoreInfo[]>("/stores");
   },
 
-  getBaskets() {
-    return request<BasketSummary[]>("/baskets");
+  getBaskets(limit = 20, offset = 0) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    return request<{ items: BasketSummary[]; total: number; limit: number; offset: number; has_more: boolean }>(`/baskets?${params.toString()}`);
   },
 
   getBasket(basketId: string) {
@@ -104,6 +111,51 @@ export const apiClient = {
     return request<{ message: string }>(`/baskets/${basketId}/items/${productId}`, {
       method: "PATCH",
       body: JSON.stringify({ quantity }),
+    });
+  },
+
+  logout() {
+    return request<{ detail: string }>("/auth/logout", { method: "POST" });
+  },
+
+  getBackupStatus() {
+    return request<{ last_backup: string | null; status: string }>("/admin/backup-status");
+  },
+
+  triggerBackup() {
+    return request<{ detail: string }>("/admin/backup", { method: "POST" });
+  },
+
+  promoteUser(username: string, role: string) {
+    return request<{ detail: string }>("/admin/promote", {
+      method: "POST",
+      body: JSON.stringify({ username, role }),
+    });
+  },
+
+  forceParserCheck() {
+    return request<{ detail: string }>("/monitoring/parser-check", { method: "POST" });
+  },
+
+  deleteBasket(basketId: string) {
+    return request<void>(`/baskets/${basketId}`, { method: "DELETE" });
+  },
+
+  deleteBasketItem(basketId: string, productId: string) {
+    return request<void>(`/baskets/${basketId}/items/${productId}`, { method: "DELETE" });
+  },
+
+  forgotPassword(email: string) {
+    return request<{ detail: string }>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  resetPassword(token: string, newPassword: string) {
+    return request<{ detail: string }>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, new_password: newPassword }),
     });
   },
 };

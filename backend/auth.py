@@ -13,9 +13,65 @@ from passlib.context import CryptContext
 
 from backend.db import SessionLocal
 from backend.infrastructure.db.models import UserRecord
+from backend.infrastructure.cache.cache import _get_client
 from backend.repositories import UserRepository
 
 logger = logging.getLogger(__name__)
+
+
+def send_verification_email(username: str, email: str, token: str) -> None:
+    """Send verification email. In development, only log the URL."""
+    import os
+    import smtplib
+    from email.mime.text import MIMEText
+
+    base_url = os.getenv("BASE_URL", "http://localhost:8001")
+    verify_url = f"{base_url}/auth/verify?token={token}"
+    environment = os.getenv("ENVIRONMENT", "development")
+
+    if environment == "development":
+        logger.info("DEV — email verification URL for %s: %s", username, verify_url)
+        return
+
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER", "")
+    smtp_password = os.getenv("SMTP_PASSWORD", "")
+    smtp_from = os.getenv("SMTP_FROM", smtp_user)
+
+    body = f"Hola {username},\n\nVerifica tu cuenta aquí:\n{verify_url}\n\nEste enlace expira en 24 horas."
+    msg = MIMEText(body)
+    msg["Subject"] = "Verifica tu cuenta — Radar de Precios"
+    msg["From"] = smtp_from
+    msg["To"] = email
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            if smtp_user:
+                server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+    except Exception as exc:
+        logger.error("Failed to send verification email to %s: %s", email, exc)
+
+
+def revoke_token(jti: str, ttl_seconds: int) -> None:
+    """Write jti to Redis blacklist so the token cannot be reused after logout."""
+    try:
+        client = _get_client()
+        client.set(f"jwt:blacklist:{jti}", "1", ex=ttl_seconds)
+    except Exception as exc:
+        logger.warning("Failed to revoke token jti=%s: %s", jti, exc)
+
+
+def is_token_revoked(jti: str) -> bool:
+    """Return True if the jti has been revoked (exists in Redis blacklist)."""
+    try:
+        client = _get_client()
+        return client.exists(f"jwt:blacklist:{jti}") > 0
+    except Exception as exc:
+        logger.warning("Failed to check token revocation jti=%s: %s", jti, exc)
+        return False
 
 
 def _get_secret_key() -> str:
@@ -119,6 +175,17 @@ class TokenService:
             username: str = payload.get("sub")
             if username is None:
                 return None
+            jti: str = payload.get("jti", "")
+            if jti and is_token_revoked(jti):
+                return None
             return username
+        except JWTError:
+            return None
+
+    @staticmethod
+    def decode_payload(token: str) -> Optional[dict]:
+        """Decode without blacklist check — used only by logout to extract jti."""
+        try:
+            return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         except JWTError:
             return None
