@@ -67,8 +67,12 @@ def revoke_token(jti: str, ttl_seconds: int) -> None:
 def is_token_revoked(jti: str) -> bool:
     """Return True if the jti has been revoked (exists in Redis blacklist)."""
     try:
+        import redis as _redis_module
         client = _get_client()
         return client.exists(f"jwt:blacklist:{jti}") > 0
+    except (_redis_module.exceptions.ConnectionError, _redis_module.exceptions.TimeoutError):
+        # Redis unavailable — assume token is valid (fail-open for availability)
+        return False
     except Exception as exc:
         logger.warning("Failed to check token revocation jti=%s: %s", jti, exc)
         return False
