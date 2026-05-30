@@ -55,6 +55,7 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-change-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS env var required}
     volumes:
       - .:/app
       - ./data:/app/data

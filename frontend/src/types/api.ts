@@ -107,6 +107,7 @@ export interface UserRegisterRequest {
 export interface UserResponse {
   username: string;
   email: string;
+  is_verified: boolean;
 }
 
 export interface PriceHistoryPoint {

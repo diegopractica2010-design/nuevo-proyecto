@@ -12,9 +12,17 @@ from typing import Optional
 # FASE A/4: Initialize logging and Celery first
 # ============================================================================
 from backend.logging_setup import setup_logging
+
 setup_logging()
 
-from backend.config import FRONTEND_DIR, MAX_RESULTS, CORS_ORIGINS, PROMETHEUS_ENABLED
+from backend.config import (
+    BASE_URL,
+    CORS_ALLOW_CREDENTIALS,
+    CORS_ORIGINS,
+    FRONTEND_DIR,
+    MAX_RESULTS,
+    PROMETHEUS_ENABLED,
+)
 from backend.db import init_db
 from backend.exception_handlers import register_exception_handlers
 from backend.middleware import RateLimitMiddleware, RequestIdMiddleware, LoggingMiddleware
@@ -25,7 +33,14 @@ from backend.search_service import SearchServiceError, _persist_prices, search_p
 from backend.basket_service import BasketService, PriceHistoryService
 from backend.models_baskets import Basket, BasketSummary
 from backend.auth import AuthService, TokenService, require_admin
-from backend.models_auth import Token, UserCreate, UserLogin, UserResponse
+from backend.models_auth import (
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    Token,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+)
 
 # FASE 4: Import new modules
 from backend.security import SecurityHeadersMiddleware
@@ -34,6 +49,7 @@ from backend.metrics import (
     get_metrics_response,
 )
 from backend.backup import BackupManager
+from backend.email_utils import send_password_reset_email, send_verification_email
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +103,7 @@ async def lifespan(app: FastAPI):
     finally:
         await _shutdown_event()
 
+
 # ============================================================================
 # FastAPI App Initialization
 # ============================================================================
@@ -134,7 +151,7 @@ app.add_middleware(
     allow_origins=CORS_ORIGINS,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
-    allow_credentials=True,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
     max_age=3600,  # Cache preflight 1 hour
 )
 
@@ -156,7 +173,9 @@ def _result_count(result: SearchResponse | dict) -> int:
     return len(result.results)
 
 
-def _username_from_authorization(authorization: Optional[str], *, required: bool = False) -> Optional[str]:
+def _bearer_token_from_authorization(
+    authorization: Optional[str], *, required: bool = False
+) -> Optional[str]:
     if not authorization:
         if required:
             raise HTTPException(status_code=401, detail="Authorization header missing")
@@ -164,8 +183,17 @@ def _username_from_authorization(authorization: Optional[str], *, required: bool
 
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid authorization header")
+    return authorization[7:]
 
-    username = TokenService.verify_token(authorization[7:])
+
+def _username_from_authorization(
+    authorization: Optional[str], *, required: bool = False
+) -> Optional[str]:
+    token = _bearer_token_from_authorization(authorization, required=required)
+    if not token:
+        return None
+
+    username = TokenService.verify_token(token)
     if not username:
         raise HTTPException(status_code=401, detail="Invalid token")
     return username
@@ -181,7 +209,11 @@ def index():
     logger.info("Serving index page")
     next_index = FRONTEND_DIR / "out" / "index.html"
     legacy_index = FRONTEND_DIR / "index.html"
-    return FileResponse(next_index if next_index.exists() else legacy_index)
+    if next_index.exists():
+        return FileResponse(next_index)
+    if legacy_index.exists():
+        return FileResponse(legacy_index)
+    return HTMLResponse("<html><body><h1>Radar de Precios</h1></body></html>")
 
 
 @app.get("/health", include_in_schema=False)
@@ -218,6 +250,7 @@ def health_full():
 @app.get("/status", include_in_schema=False)
 def status_dashboard():
     from backend.status_dashboard import get_status_html
+
     return HTMLResponse(content=get_status_html())
 
 
@@ -236,6 +269,7 @@ def scraper_health():
 @app.get("/stores")
 def get_stores():
     from backend.store_adapters import list_stores
+
     return [
         {"id": s.name, "display_name": s.display_name, "experimental": s.experimental}
         for s in list_stores()
@@ -414,7 +448,7 @@ def get_price_history(
         "product_id": product_id,
         "store": store,
         "history": [h.model_dump() for h in history],
-        "trends": trends
+        "trends": trends,
     }
 
 
@@ -475,6 +509,7 @@ def _get_canonical_price_history(canonical_key: str, store: str, days: int) -> d
 def monitoring_parser_status():
     """Get parser monitoring status (FASE A)."""
     from backend.parser_monitor import get_parser_status
+
     logger.info("Parser status requested")
     return get_parser_status()
 
@@ -483,6 +518,7 @@ def monitoring_parser_status():
 def monitoring_parser_check(store: str = Query("lider")):
     """Manually trigger parser change check (FASE A)."""
     from backend.parser_monitor import compare_snapshots
+
     logger.info(f"Manual parser check triggered for {store}")
     result = compare_snapshots(store)
     return result or {"status": "error"}
@@ -492,8 +528,9 @@ def monitoring_parser_check(store: str = Query("lider")):
 def monitoring_celery_debug():
     """Debug Celery tasks (FASE A - dev only)."""
     from backend.tasks import debug_task
+
     logger.info("Submitting debug task to Celery")
-    
+
     try:
         task_result = debug_task.delay()
         return {
@@ -511,13 +548,31 @@ def monitoring_celery_debug():
 
 # Endpoints de autenticación
 @app.post("/auth/register", response_model=UserResponse)
-def register(user: UserCreate):
+def register(background: BackgroundTasks, user: UserCreate):
     logger.info(f"Registering user: {user.username}")
     try:
         db_user = AuthService.create_user(user.username, user.email, user.password)
-        return UserResponse(username=db_user.username, email=db_user.email)
+        verification_token = TokenService.create_email_verification_token(db_user.username)
+        verification_url = f"{BASE_URL}/auth/verify?token={verification_token}"
+        background.add_task(send_verification_email, db_user.email, verification_url)
+        return UserResponse(
+            username=db_user.username,
+            email=db_user.email,
+            is_verified=db_user.is_verified,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/auth/verify")
+def verify_email(token: str = Query(..., description="Email verification JWT")):
+    payload = TokenService.decode_token(token)
+    if payload.get("purpose") != "email_verify":
+        raise HTTPException(status_code=401, detail="Invalid token")
+    username = payload.get("sub")
+    if not username or not AuthService.verify_email(username):
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return {"detail": "Email verified. You can now log in."}
 
 
 @app.post("/auth/login", response_model=Token)
@@ -530,32 +585,65 @@ def login(user: UserLogin):
     return Token(access_token=access_token, token_type="bearer")
 
 
+@app.post("/auth/logout", status_code=204)
+def logout(authorization: str = Header(None, description="JWT token (Bearer)")):
+    token = _bearer_token_from_authorization(authorization, required=True)
+    _username_from_authorization(authorization, required=True)
+    TokenService.revoke_access_token(token)
+    return Response(status_code=204)
+
+
+@app.post("/auth/forgot-password")
+def forgot_password(background: BackgroundTasks, payload: ForgotPasswordRequest):
+    user = AuthService.get_user_by_email(payload.email)
+    if user:
+        reset_token = TokenService.create_password_reset_token(user.username)
+        TokenService.store_password_reset_token(user.username, reset_token)
+        reset_url = f"{BASE_URL}/reset-password?token={reset_token}"
+        background.add_task(send_password_reset_email, user.email, reset_url)
+    return {"detail": "If that email exists, a reset link was sent."}
+
+
+@app.post("/auth/reset-password")
+def reset_password(payload: ResetPasswordRequest):
+    token_payload = TokenService.decode_token(payload.token)
+    if token_payload.get("purpose") != "pwd_reset":
+        raise HTTPException(status_code=401, detail="Invalid token")
+    username = token_payload.get("sub")
+    if not username or not TokenService.password_reset_token_matches(username, payload.token):
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if not AuthService.update_password(username, payload.new_password):
+        raise HTTPException(status_code=401, detail="Invalid token")
+    TokenService.delete_password_reset_token(username)
+    return {"detail": "Password updated. Please log in."}
+
+
 @app.get("/auth/me", response_model=UserResponse)
 def get_current_user(authorization: str = Header(None, description="JWT token (Bearer)")):
     username = _username_from_authorization(authorization, required=True)
     user = AuthService.get_user(username)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return UserResponse(username=user.username, email=user.email)
+    return UserResponse(username=user.username, email=user.email, is_verified=user.is_verified)
 
 
 @app.post("/auth/refresh", response_model=Token)
 def refresh_token(authorization: str = Header(None, description="JWT token (Bearer)")):
     """Refresh JWT token: accepts a valid Bearer token, returns a new one with reset TTL."""
     logger.info("Token refresh attempt")
-    
+
     # Validate current token
     username = _username_from_authorization(authorization, required=True)
-    
+
     # Verify user exists
     user = AuthService.get_user(username)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     # Create new token with reset TTL
     new_token = TokenService.create_access_token(data={"sub": username})
     logger.info(f"Token refreshed for user: {username}")
-    
+
     return Token(access_token=new_token, token_type="bearer")
 
 
@@ -567,7 +655,7 @@ def metrics():
     """Prometheus metrics endpoint (FASE 4)."""
     if not PROMETHEUS_ENABLED:
         raise HTTPException(status_code=404, detail="Metrics disabled")
-    
+
     metrics_data, content_type = get_metrics_response()
     return Response(content=metrics_data, media_type=content_type)
 
@@ -582,14 +670,14 @@ def trigger_backup(username: str = Depends(require_admin)):
         logger.info(f"Backup triggered by {username}")
         manager = BackupManager()
         results = manager.backup_all()
-        
+
         # Try to upload to S3 if configured
         try:
             s3_result = manager.upload_to_s3()
             results["s3_upload"] = s3_result
         except Exception as e:
             logger.warning(f"S3 upload failed: {e}")
-        
+
         return {
             "status": "success",
             "message": "Backup completed",
@@ -606,20 +694,23 @@ def backup_status(username: str = Depends(require_admin)):
     """Get backup status and list (FASE 4 - Admin only)."""
     try:
         from pathlib import Path
+
         backup_path = Path("./data/backups")
-        
+
         if not backup_path.exists():
             return {"backups": [], "status": "no_backups"}
-        
+
         backups = []
         for backup_dir in sorted(backup_path.iterdir(), reverse=True)[:10]:
             if backup_dir.is_dir():
-                backups.append({
-                    "timestamp": backup_dir.name,
-                    "files": list(backup_dir.glob("*")),
-                    "size": sum(f.stat().st_size for f in backup_dir.glob("*")),
-                })
-        
+                backups.append(
+                    {
+                        "timestamp": backup_dir.name,
+                        "files": list(backup_dir.glob("*")),
+                        "size": sum(f.stat().st_size for f in backup_dir.glob("*")),
+                    }
+                )
+
         return {
             "status": "success",
             "backups": backups,
@@ -635,11 +726,14 @@ def promote_user(username: str = Query(..., description="Username to promote to 
     """Bootstrap endpoint: promote a user to admin. Only works when no admins exist."""
     from backend.db import SessionLocal
     from backend.repositories import UserRepository
+
     with SessionLocal() as session:
         repo = UserRepository(session)
         admin_count = repo.count_admins()
         if admin_count > 0:
-            raise HTTPException(status_code=403, detail="Bootstrap endpoint disabled: admins already exist")
+            raise HTTPException(
+                status_code=403, detail="Bootstrap endpoint disabled: admins already exist"
+            )
         user = repo.get_by_username(username)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -663,7 +757,10 @@ async def test_alert(username: str = Depends(require_admin)):
     )
     if sent:
         return {"status": "sent", "message": "Test alert sent to Slack successfully"}
-    return {"status": "failed", "message": "Failed to send alert — check SLACK_WEBHOOK_URL in config"}
+    return {
+        "status": "failed",
+        "message": "Failed to send alert — check SLACK_WEBHOOK_URL in config",
+    }
 
 
 # ============================================================================
@@ -673,6 +770,7 @@ def signal_handler(signum, frame):
     """Handle shutdown signals."""
     logger.info(f"Received signal {signum}, initiating shutdown...")
     import sys
+
     sys.exit(0)
 
 

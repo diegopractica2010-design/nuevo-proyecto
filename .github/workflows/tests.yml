@@ -122,6 +122,7 @@ jobs:
           JWT_SECRET_KEY=smoke-test-secret-key-32-chars-ok
           POSTGRES_PASSWORD=radar123
           REDIS_PASSWORD=redis123
+          CORS_ORIGINS=http://localhost:3000,http://localhost:8001
           ENVEOF
 
       - name: Build and start stack
@@ -172,4 +173,3 @@ jobs:
         run: |
           pip install detect-secrets
           detect-secrets scan --baseline .secrets.baseline
-        continue-on-error: true

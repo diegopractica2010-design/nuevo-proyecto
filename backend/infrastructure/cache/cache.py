@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
@@ -11,6 +12,7 @@ except ImportError:  # pragma: no cover - exercised only in minimal environments
 
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+logger = logging.getLogger(__name__)
 
 
 _client = None
@@ -45,6 +47,21 @@ def cache_delete(*keys: str) -> int:
         return 0
     client = _get_client()
     return int(client.delete(*keys))
+
+
+def revoke_token(jti: str, ttl_seconds: int) -> None:
+    try:
+        cache_set(f"jwt:blacklist:{jti}", True, ttl=ttl_seconds)
+    except Exception as exc:
+        logger.warning("Unable to revoke JWT in Redis: %s", exc)
+
+
+def is_token_revoked(jti: str) -> bool:
+    try:
+        return cache_get(f"jwt:blacklist:{jti}") is not None
+    except Exception as exc:
+        logger.warning("Unable to check JWT blacklist in Redis: %s", exc)
+        return False
 
 
 def _get_client():

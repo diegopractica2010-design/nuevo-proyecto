@@ -18,7 +18,9 @@ def _page(products, page):
 
 
 def test_lider_search_paginates_until_limit_and_deduplicates():
-    with patch("backend.infrastructure.scrapers.lider.LiderScraper._fetch_catalog_page") as fetch_page:
+    with patch(
+        "backend.infrastructure.scrapers.lider.LiderScraper._fetch_catalog_page"
+    ) as fetch_page:
         fetch_page.side_effect = [
             _page(
                 [
@@ -74,14 +76,28 @@ class _FakeSession:
                 {
                     "productId": "1",
                     "productName": "Arroz A",
-                    "items": [{"itemId": "sku-1", "sellers": [{"commertialOffer": {"Price": 1000, "AvailableQuantity": 1}}]}],
+                    "items": [
+                        {
+                            "itemId": "sku-1",
+                            "sellers": [
+                                {"commertialOffer": {"Price": 1000, "AvailableQuantity": 1}}
+                            ],
+                        }
+                    ],
                 }
             ],
             2: [
                 {
                     "productId": "2",
                     "productName": "Arroz B",
-                    "items": [{"itemId": "sku-2", "sellers": [{"commertialOffer": {"Price": 1200, "AvailableQuantity": 1}}]}],
+                    "items": [
+                        {
+                            "itemId": "sku-2",
+                            "sellers": [
+                                {"commertialOffer": {"Price": 1200, "AvailableQuantity": 1}}
+                            ],
+                        }
+                    ],
                 }
             ],
         }
@@ -91,7 +107,10 @@ class _FakeSession:
 def test_jumbo_api_search_paginates_until_limit():
     session = _FakeSession()
 
-    with patch("backend.scraper_jumbo.assert_live_store_access_allowed"):
+    with (
+        patch("backend.scraper_jumbo.assert_live_store_access_allowed"),
+        patch("backend.scraper_jumbo.JUMBO_API_KEY", "test-api-key"),
+    ):
         result = asyncio.run(_execute_catalog_api_query(session, "arroz", limit=2))
 
     assert [product["sku"] for product in result.products] == ["sku-1", "sku-2"]
