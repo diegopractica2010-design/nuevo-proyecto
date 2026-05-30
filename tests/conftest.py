@@ -86,8 +86,9 @@ def test_user(db_session: Session) -> UserRecord:
     user = UserRecord(
         username="testuser",
         email="testuser@example.com",
-        hashed_password=pwd_context.hash("password123"),
+        hashed_password=pwd_context.hash("StrongPass123!"),
         role="user",
+        is_verified=True,
     )
     db_session.add(user)
     db_session.commit()
@@ -102,12 +103,15 @@ async def auth_headers(client: AsyncClient) -> dict[str, str]:
         json={
             "username": "authuser",
             "email": "authuser@example.com",
-            "password": "password123",
+            "password": "StrongPass123!",
         },
     )
+    from backend.auth import AuthService
+
+    AuthService.verify_email("authuser")
     response = await client.post(
         "/auth/login",
-        json={"username": "authuser", "password": "password123"},
+        json={"username": "authuser", "password": "StrongPass123!"},
     )
     response.raise_for_status()
     token = response.json()["access_token"]

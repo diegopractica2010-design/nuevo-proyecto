@@ -29,6 +29,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(payload?.detail ?? `Request failed with ${response.status}`);
   }
 
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return response.json() as Promise<T>;
 }
 
@@ -62,6 +66,29 @@ export const apiClient = {
     return request<UserResponse>("/auth/register", {
       method: "POST",
       body: JSON.stringify(body)
+    });
+  },
+
+  async logout() {
+    await request<void>("/auth/logout", {
+      method: "POST"
+    });
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("auth_token");
+    }
+  },
+
+  forgotPassword(email: string) {
+    return request<{ detail: string }>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email })
+    });
+  },
+
+  resetPassword(token: string, newPassword: string) {
+    return request<{ detail: string }>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, new_password: newPassword })
     });
   },
 

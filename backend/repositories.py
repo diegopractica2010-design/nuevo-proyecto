@@ -6,7 +6,12 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from backend.infrastructure.db.models import BasketItemRecord, BasketRecord, PriceHistoryRecord, UserRecord
+from backend.infrastructure.db.models import (
+    BasketItemRecord,
+    BasketRecord,
+    PriceHistoryRecord,
+    UserRecord,
+)
 
 
 class UserRepository:
@@ -17,12 +22,17 @@ class UserRepository:
         return self.session.get(UserRecord, username)
 
     def get_by_email(self, email: str) -> Optional[UserRecord]:
-        return self.session.scalar(select(UserRecord).where(UserRecord.email == email))
+        return self.session.scalar(
+            select(UserRecord).where(func.lower(UserRecord.email) == email.lower())
+        )
 
     def count_admins(self) -> int:
-        return self.session.scalar(
-            select(func.count()).select_from(UserRecord).where(UserRecord.role == "admin")
-        ) or 0
+        return (
+            self.session.scalar(
+                select(func.count()).select_from(UserRecord).where(UserRecord.role == "admin")
+            )
+            or 0
+        )
 
     def create(self, username: str, email: str, hashed_password: str) -> UserRecord:
         user = UserRecord(
@@ -151,7 +161,9 @@ class PriceHistoryRepository:
         self.session.add(record)
         return record
 
-    def list_for_product(self, product_id: str, store: str, limit: int = 30) -> list[PriceHistoryRecord]:
+    def list_for_product(
+        self, product_id: str, store: str, limit: int = 30
+    ) -> list[PriceHistoryRecord]:
         return list(
             self.session.scalars(
                 select(PriceHistoryRecord)

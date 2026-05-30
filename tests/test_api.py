@@ -29,32 +29,23 @@ class APITests(unittest.TestCase):
             "applied_query": "leche",
             "count": 1,
             "results": [
-                {
-                    "name": "Leche Entera",
-                    "price": 1000.0,
-                    "brand": "Test",
-                    "source": "lider"
-                }
+                {"name": "Leche Entera", "price": 1000.0, "brand": "Test", "source": "lider"}
             ],
             "stats": {
                 "min_price": 1000.0,
                 "max_price": 1000.0,
                 "average_price": 1000.0,
                 "offer_count": 0,
-                "in_stock_count": 1
+                "in_stock_count": 1,
             },
-            "facets": {
-                "brands": [],
-                "categories": [],
-                "price_range": {"min": None, "max": None}
-            },
+            "facets": {"brands": [], "categories": [], "price_range": {"min": None, "max": None}},
             "suggestions": [],
             "cached": False,
             "warning": None,
             "fetched_at": "2024-01-01T00:00:00Z",
             "source": "lider",
             "source_url": "https://super.lider.cl/search?q=leche",
-            "strategy": "search:browser"
+            "strategy": "search:browser",
         }
 
         response = self.client.get("/search?query=leche&limit=10")
@@ -106,11 +97,14 @@ class APITests(unittest.TestCase):
     def test_authenticated_baskets_are_scoped_to_current_user(self):
         self.client.post(
             "/auth/register",
-            json={"username": "paula", "email": "paula@example.com", "password": "password123"},
+            json={"username": "paula", "email": "paula@example.com", "password": "StrongPass123!"},
         )
+        from backend.auth import AuthService
+
+        AuthService.verify_email("paula")
         login = self.client.post(
             "/auth/login",
-            json={"username": "paula", "password": "password123"},
+            json={"username": "paula", "password": "StrongPass123!"},
         )
         token = login.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
