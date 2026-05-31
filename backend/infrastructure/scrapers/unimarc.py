@@ -29,7 +29,7 @@ class UnimarcScraper(BaseScraper):
 
     async def search(self, query: str, *, limit: int = 40) -> ScrapedSearchResult:
         from backend.compliance import assert_live_store_access_allowed
-        assert_live_store_access_allowed("unimarc")
+        assert_live_store_access_allowed("unimarc", UNIMARC_API_URL, purpose="search")
 
         try:
             return await self._try_api(query, limit)

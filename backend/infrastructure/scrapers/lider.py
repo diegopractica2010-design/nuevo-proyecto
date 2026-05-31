@@ -232,6 +232,14 @@ class LiderScraper(BaseScraper):
         normalized_query = normalize_query(query)
         attempts: list[str] = []
 
+        graphql_headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Origin": "https://super.lider.cl",
+            "Referer": f"https://super.lider.cl/search?q={quote_plus(normalized_query)}",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+
         for payload in self._graphql_payloads(normalized_query, page):
             operation = str(payload.get("operationName") or "graphql")
             try:
@@ -239,6 +247,7 @@ class LiderScraper(BaseScraper):
                 response = await self.session.post(
                     LIDER_GRAPHQL_URL,
                     json=payload,
+                    headers=graphql_headers,
                     timeout=REQUEST_TIMEOUT,
                 )
                 response.raise_for_status()
@@ -318,40 +327,62 @@ class LiderScraper(BaseScraper):
 
     def _graphql_payloads(self, query: str, page: int) -> list[dict[str, Any]]:
         """Genera payloads GraphQL para intentar múltiples operaciones."""
-        variables = {"query": query, "page": page, "prg": "desktop", "sort": "best_match"}
-        fragment = """
+        # Fragment minimal — evita campos que pueden no existir en el schema actual
+        fragment_full = """
             itemStacks {
               items {
                 id
-                usItemId
                 name
                 brand
                 canonicalUrl
                 image
                 imageInfo { thumbnailUrl allImages { url } }
                 sellerName
-                category { path name }
                 priceInfo { linePrice itemPrice wasPrice unitPrice savings savingsAmt }
                 availabilityStatusV2 { value display }
                 badges { text key type }
               }
             }
         """
+        fragment_minimal = """
+            itemStacks {
+              items {
+                id
+                name
+                brand
+                image
+                priceInfo { linePrice itemPrice wasPrice }
+              }
+            }
+        """
+        base_vars = {"query": query, "page": page}
+        vars_with_sort = {**base_vars, "sort": "best_match"}
         return [
+            # Intento 1: getSearch con sort (más campos)
             {
                 "operationName": "getSearch",
-                "variables": variables,
+                "variables": vars_with_sort,
                 "query": (
-                    "query getSearch($query: String, $page: Int, $prg: String, $sort: String) "
-                    f"{{ search(searchQuery: $query, page: $page, prg: $prg, sort: $sort) {{ {fragment} }} }}"
+                    "query getSearch($query: String, $page: Int, $sort: String) "
+                    f"{{ search(query: $query, page: $page, sort: $sort) {{ {fragment_full} }} }}"
                 ),
             },
+            # Intento 2: getSearch sin sort (más compatible)
+            {
+                "operationName": "getSearch",
+                "variables": base_vars,
+                "query": (
+                    "query getSearch($query: String, $page: Int) "
+                    f"{{ search(query: $query, page: $page) {{ {fragment_full} }} }}"
+                ),
+            },
+            # Intento 3: searchResult con variables mínimas
             {
                 "operationName": "getSearchPage",
-                "variables": variables,
+                "variables": base_vars,
                 "query": (
-                    "query getSearchPage($query: String, $page: Int, $prg: String, $sort: String) "
-                    f"{{ searchResult(query: $query, page: $page, prg: $prg, sort: $sort) {{ {fragment} }} }}"
+                    "query getSearchPage($query: String, $page: Int) "
+                    f"{{ searchResult(query: $query, page: $page) {{ {fragment_minimal} }} }}"
                 ),
             },
         ]
@@ -475,11 +506,17 @@ class LiderScraper(BaseScraper):
 
     def _extract_products_from_next_data(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         candidate_paths = [
+            # Walmart Chile / Lider / Acuenta — rutas conocidas
             ["props", "pageProps", "searchResult", "products"],
+            ["props", "pageProps", "searchResult", "itemStacks"],
             ["props", "pageProps", "data", "search", "products"],
+            ["props", "pageProps", "data", "search", "itemStacks"],
             ["props", "pageProps", "initialData", "products"],
+            ["props", "pageProps", "initialData", "search", "products"],
             ["props", "pageProps", "products"],
             ["props", "pageProps", "searchData", "products"],
+            ["props", "pageProps", "pageProps", "products"],
+            # React Query / TanStack Query dehydrated state
             ["props", "pageProps", "dehydratedState", "queries"],
         ]
 
@@ -489,11 +526,30 @@ class LiderScraper(BaseScraper):
                 if not isinstance(node, dict):
                     break
                 node = node.get(key)
-            products = self._coerce_product_list(node)
-            if products:
-                return products
+            else:
+                # Path completed: try to extract products from this node
+                # Special case: dehydratedState.queries is a list of query objects
+                if isinstance(node, list) and node and isinstance(node[0], dict) and "state" in node[0]:
+                    products = self._extract_from_react_query_list(node)
+                    if products:
+                        return products
+                    continue
+                products = self._coerce_product_list(node)
+                if products:
+                    return products
 
         return self._recursive_find_product_list(data, depth=0, max_depth=8)
+
+    def _extract_from_react_query_list(self, queries: list[dict]) -> list[dict[str, Any]]:
+        """Extrae productos de la estructura dehydratedState.queries de React Query."""
+        for query_obj in queries:
+            state = query_obj.get("state") or {}
+            query_data = state.get("data") or {}
+            # Busca recursivamente dentro del estado de cada query
+            products = self._recursive_find_product_list(query_data, depth=0, max_depth=6)
+            if products:
+                return products
+        return []
 
     def _parse_initial_state(self, html: str, limit: int) -> list[ScrapedProduct]:
         match = re.search(
