@@ -1,0 +1,154 @@
+version: '3.9'
+
+# Compose standalone: todo se construye dentro de Docker.
+# No requiere Node.js ni Python instalados localmente.
+# Uso: docker-compose -f docker-compose.standalone.yml up --build
+#   o: start.bat
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: radar-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis123}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - radar-network
+
+  db:
+    image: postgres:16-alpine
+    container_name: radar-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-radar_precios}
+      POSTGRES_USER: ${POSTGRES_USER:-radar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-radar123}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radar} -d ${POSTGRES_DB:-radar_precios}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - radar-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: radar-app
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-radar}:${POSTGRES_PASSWORD:-radar123}@db:5432/${POSTGRES_DB:-radar_precios}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis123}
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/2
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-cambia-esto-en-produccion-32chars!!}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DEBUG: ${DEBUG:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:80,http://localhost}
+      PYTHONPATH: /app
+    volumes:
+      - app_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "python -m alembic upgrade head &&
+             python -m uvicorn backend.main:app --host 0.0.0.0 --port 8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - radar-network
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: radar-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-radar}:${POSTGRES_PASSWORD:-radar123}@db:5432/${POSTGRES_DB:-radar_precios}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis123}
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/2
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PYTHONPATH: /app
+    volumes:
+      - app_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    command: python -m celery -A backend.celery_app worker --loglevel=info --concurrency=2
+    networks:
+      - radar-network
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: radar-beat
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-radar}:${POSTGRES_PASSWORD:-radar123}@db:5432/${POSTGRES_DB:-radar_precios}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis123}
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/2
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PYTHONPATH: /app
+    volumes:
+      - app_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    command: python -m celery -A backend.celery_app beat --loglevel=info --schedule=/app/data/celerybeat-schedule
+    networks:
+      - radar-network
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: radar-nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - radar-network
+
+volumes:
+  redis_data:
+  postgres_data:
+  app_data:
+
+networks:
+  radar-network:
+    driver: bridge
