@@ -4,8 +4,14 @@
 
 import os
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 ROOT = Path(SPECPATH)
+
+# Collect all submodules for packages that use dynamic imports
+celery_hidden = collect_submodules('celery')
+kombu_hidden = collect_submodules('kombu')
+billiard_hidden = collect_submodules('billiard')
 
 # Include frontend static files if they exist
 datas = []
@@ -135,19 +141,10 @@ a = Analysis(
         'redis.exceptions',
         'redis.asyncio',
         'hiredis',
-        # celery (startup won't fail even if worker can't spawn)
-        'celery',
-        'celery.app',
-        'celery.app.builtins',
-        'celery.backends',
-        'celery.backends.redis',
-        'celery.loaders',
-        'celery.loaders.app',
-        'kombu',
-        'kombu.transport',
-        'kombu.transport.redis',
-        'kombu.serialization',
-        'billiard',
+        # celery / kombu / billiard — collected via collect_submodules above
+        *celery_hidden,
+        *kombu_hidden,
+        *billiard_hidden,
         # requests + BeautifulSoup
         'requests',
         'requests.adapters',
