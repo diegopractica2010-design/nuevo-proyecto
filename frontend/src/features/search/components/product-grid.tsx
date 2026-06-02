@@ -15,9 +15,9 @@ export function ProductGrid({
 }) {
   if (isLoading) {
     return (
-      <div className="grid gap-3 md:grid-cols-2">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} className="h-28 rounded-xl" />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        {Array.from({ length: 10 }).map((_, i) => (
+          <Skeleton key={i} className="h-72 rounded-xl" />
         ))}
       </div>
     );
@@ -25,9 +25,10 @@ export function ProductGrid({
 
   if (!products.length) {
     return (
-      <div className="flex min-h-48 items-center justify-center rounded-xl border border-dashed border-border bg-muted/40 p-8 text-center">
+      <div className="flex min-h-48 items-center justify-center rounded-xl border border-dashed border-[#e8eaed] bg-white p-8 text-center shadow-sm">
         <div>
-          <p className="text-sm font-medium text-foreground">
+          <p className="text-2xl">🔍</p>
+          <p className="mt-2 text-sm font-semibold text-[#1a2332]">
             {emptyQuery ? `Sin resultados para "${emptyQuery}"` : "Sin resultados"}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -38,16 +39,16 @@ export function ProductGrid({
     );
   }
 
-  const minPrice = Math.min(...products.map((p) => p.price));
+  const minPrice = Math.min(...products.filter((p) => p.price > 0).map((p) => p.price));
 
   return (
-    <div className="grid gap-3 md:grid-cols-2">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
       {products.map((product, index) => (
         <ProductCard
           key={`${product.source}-${product.sku ?? product.id ?? product.name}-${index}`}
           product={product}
           index={index}
-          isCheapest={product.price === minPrice}
+          isCheapest={product.price > 0 && product.price === minPrice}
         />
       ))}
     </div>

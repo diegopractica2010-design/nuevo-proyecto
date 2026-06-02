@@ -1,384 +1,268 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  ArrowDown01, ArrowUp01, ArrowDownUp, Coffee, Milk, ShoppingBag, Sparkles, Wheat, Wind,
-} from "lucide-react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { Search, ShoppingBasket, Milk, Wheat, Wind, Coffee, Apple, Beef } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSearchProducts } from "@/hooks/use-search-products";
 import { useAppStore } from "@/stores/use-app-store";
 import { cn } from "@/lib/utils";
 import { ProductGrid } from "./product-grid";
+import { StoreTabs } from "@/components/layout/app-shell";
 
-// ── Rotating placeholder ───────────────────────────────────────────────────
+// ── Category quick-searches ────────────────────────────────────────────────
+
+const CATEGORIES = [
+  { label: "Leche",      icon: Milk,           q: "leche entera 1 litro" },
+  { label: "Arroz",      icon: Wheat,          q: "arroz 1 kilo"         },
+  { label: "Aceite",     icon: Coffee,         q: "aceite vegetal 1 litro"},
+  { label: "Detergente", icon: Wind,           q: "detergente ropa"      },
+  { label: "Fruta",      icon: Apple,          q: "manzana roja kilo"    },
+  { label: "Carne",      icon: Beef,           q: "pechuga de pollo kilo"},
+  { label: "Canasta",    icon: ShoppingBasket, q: "pasta fideos"         },
+];
+
+// ── Feature cards (Knasta-style) ───────────────────────────────────────────
+
+const FEATURE_CARDS = [
+  {
+    icon: "🔥",
+    title: "Ofertas del día",
+    desc: "Las mejores bajas de precio de las últimas horas",
+    q: "oferta",
+    color: "#ff6b35",
+  },
+  {
+    icon: "🛒",
+    title: "Despensa básica",
+    desc: "Arroz, aceite, fideos y más al mejor precio",
+    q: "arroz 1 kilo",
+    color: "#00913f",
+  },
+  {
+    icon: "🥛",
+    title: "Lácteos",
+    desc: "Leche, yogur, queso y mantequilla",
+    q: "leche entera",
+    color: "#4a90d9",
+  },
+  {
+    icon: "🧴",
+    title: "Limpieza",
+    desc: "Detergentes y artículos de aseo del hogar",
+    q: "detergente limpieza hogar",
+    color: "#9b59b6",
+  },
+];
+
+// ── Rotating placeholders ──────────────────────────────────────────────────
 
 const PLACEHOLDERS = [
-  "leche entera 1 litro…",
-  "arroz 1 kilo…",
-  "detergente ropa…",
-  "yogur frutilla…",
-  "aceite maravilla 1 litro…",
-  "papel higiénico…",
-  "jugo naranja 1 litro…",
+  "leche entera 1 litro...",
+  "arroz grano largo 1 kilo...",
+  "detergente ropa...",
+  "aceite maravilla...",
+  "papel higiénico doble hoja...",
+  "yogur frutilla...",
 ];
 
-function useCyclingPlaceholder(strings: string[], ms = 2600) {
-  const [index, setIndex] = useState(0);
+function useCyclingPlaceholder(strings: string[], ms = 2800) {
+  const [idx, setIdx] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setIndex((i) => (i + 1) % strings.length), ms);
+    const id = setInterval(() => setIdx((i) => (i + 1) % strings.length), ms);
     return () => clearInterval(id);
   }, [strings, ms]);
-  return strings[index];
+  return strings[idx];
 }
-
-// ── Quick pills ────────────────────────────────────────────────────────────
-
-const PILLS: Array<{ label: string; icon: typeof Milk; q: string }> = [
-  { label: "Leche",       icon: Milk,        q: "leche entera 1 litro" },
-  { label: "Arroz",       icon: Wheat,       q: "arroz 1 kilo" },
-  { label: "Café",        icon: Coffee,      q: "café molido" },
-  { label: "Detergente",  icon: Wind,        q: "detergente ropa" },
-  { label: "Bolsas",      icon: ShoppingBag, q: "bolsas basura" },
-];
-
-type SortOrder = "default" | "asc" | "desc";
 
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function SearchDashboard() {
-  const activeStore   = useAppStore((s) => s.activeStore);
+  const activeStore     = useAppStore((s) => s.activeStore);
   const pushRecentQuery = useAppStore((s) => s.pushRecentQuery);
-  const recentQueries = useAppStore((s) => s.recentQueries);
+  const recentQueries   = useAppStore((s) => s.recentQueries);
 
-  const [draft, setDraft]             = useState("");
-  const [query, setQuery]             = useState("");
-  const [sortOrder, setSortOrder]     = useState<SortOrder>("default");
-  const [brandFilter, setBrandFilter] = useState<string | null>(null);
-  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
-  const [priceRange, setPriceRange]   = useState<[number, number] | null>(null);
+  const [draft, setDraft] = useState("");
+  const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const placeholder = useCyclingPlaceholder(PLACEHOLDERS);
-  const search = useSearchProducts(query, activeStore);
 
-  const facetPriceMin = search.data?.facets.price_range.min ?? null;
-  const facetPriceMax = search.data?.facets.price_range.max ?? null;
+  const { data: searchResponse, isLoading, isError } = useSearchProducts(query, activeStore);
+  const results = searchResponse?.results ?? [];
+  const searchWarning = searchResponse?.warning ?? null;
 
-  // Reset controls when query or store changes
-  useEffect(() => {
-    setSortOrder("default");
-    setBrandFilter(null);
-    setCategoryFilter(null);
-    setPriceRange(null);
-  }, [query, activeStore]);
-
-  const activeFilterCount =
-    (brandFilter ? 1 : 0) + (categoryFilter ? 1 : 0) + (priceRange ? 1 : 0);
-
-  function clearAllFilters() {
-    setBrandFilter(null);
-    setCategoryFilter(null);
-    setPriceRange(null);
-  }
-
-  function fire(q: string) {
-    const trimmed = q.trim();
-    if (!trimmed) return;
-    setDraft(trimmed);
-    setQuery(trimmed);
-    pushRecentQuery(trimmed);
-  }
-
-  function onSubmit(e: FormEvent) {
+  function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    fire(draft);
+    const q = draft.trim();
+    if (!q) return;
+    pushRecentQuery(q);
+    setQuery(q);
   }
 
-  const allProducts  = search.data?.results ?? [];
-  const brands       = search.data?.facets.brands ?? [];
-  const categories   = search.data?.facets.categories ?? [];
+  function fireQuery(q: string) {
+    setDraft(q);
+    pushRecentQuery(q);
+    setQuery(q);
+    inputRef.current?.focus();
+  }
 
-  const filteredSorted = useMemo(() => {
-    let list = allProducts;
-    if (brandFilter) list = list.filter((p) => p.brand === brandFilter);
-    if (categoryFilter) list = list.filter((p) => p.category === categoryFilter);
-    if (priceRange) list = list.filter((p) => p.price >= priceRange[0] && p.price <= priceRange[1]);
-    if (sortOrder === "asc")  list = [...list].sort((a, b) => a.price - b.price);
-    if (sortOrder === "desc") list = [...list].sort((a, b) => b.price - a.price);
-    return list;
-  }, [allProducts, sortOrder, brandFilter, categoryFilter, priceRange]);
-
-  const hasResults = !!search.data && search.data.count > 0;
+  const hasResults = results.length > 0;
 
   return (
-    <section className="space-y-8">
-      {/* ── Hero ── */}
-      <div className="flex flex-col items-center gap-6 pt-4 text-center">
-        <motion.h1
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-          className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl"
-        >
-          ¿Qué vas a comprar hoy?
-        </motion.h1>
+    <div className="space-y-6">
+      {/* ── Hero ───────────────────────────────────────────────── */}
+      <section className="rounded-2xl bg-white px-6 py-8 shadow-sm sm:px-10 sm:py-10">
+        <h1 className="text-center text-2xl font-bold leading-tight text-[#1a2332] sm:text-3xl md:text-4xl">
+          Compara{" "}
+          <span className="text-[#00913f]">Precios</span>{" "}
+          y Encuentra
+          <br />
+          <span className="text-[#00913f]">Ofertas Reales</span> en Chile
+        </h1>
+        <p className="mt-2 text-center text-sm text-muted-foreground">
+          Busca en Lider, Jumbo, Santa Isabel, Tottus, Acuenta y Unimarc al mismo tiempo
+        </p>
 
-        <motion.form
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.06 }}
-          onSubmit={onSubmit}
-          role="search"
-          className="relative w-full max-w-xl"
-        >
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={placeholder}
-            aria-label="Buscar productos"
-            className={cn(
-              "h-14 w-full rounded-xl border border-border bg-background px-5 pr-24",
-              "text-[15px] shadow-sm outline-none ring-0",
-              "placeholder:text-muted-foreground/60",
-              "focus:border-primary focus:ring-2 focus:ring-primary/20",
-              "transition-all duration-200"
-            )}
-          />
+        {/* Search bar */}
+        <form onSubmit={handleSubmit} className="mt-6 flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              ref={inputRef}
+              type="search"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={placeholder}
+              className={cn(
+                "h-12 w-full rounded-xl border border-border bg-[#f8f9fa] pl-10 pr-4",
+                "text-sm text-foreground placeholder:text-muted-foreground",
+                "focus:border-[#00913f] focus:outline-none focus:ring-2 focus:ring-[#00913f]/20",
+                "transition-all duration-200"
+              )}
+            />
+          </div>
           <Button
             type="submit"
-            size="sm"
-            className="absolute right-2 top-1/2 -translate-y-1/2 gap-1.5 rounded-lg px-4"
+            className="h-12 rounded-xl px-6 text-sm font-semibold"
+            style={{ background: "#00913f" }}
           >
-            <Sparkles className="h-3.5 w-3.5" />
             Buscar
           </Button>
-        </motion.form>
+        </form>
 
-        {/* Quick pills */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.12 }}
-          className="flex flex-wrap justify-center gap-2"
-        >
-          {PILLS.map(({ label, icon: Icon, q }) => (
+        {/* Store switcher */}
+        <div className="mt-4 flex justify-center">
+          <StoreTabs />
+        </div>
+
+        {/* Recent queries */}
+        {recentQueries.length > 0 && !query && (
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">Recientes:</span>
+            {recentQueries.slice(0, 6).map((q) => (
+              <button
+                key={q}
+                onClick={() => fireQuery(q)}
+                className="rounded-full border border-border bg-[#f8f9fa] px-3 py-1 text-xs font-medium text-foreground transition-colors hover:border-[#00913f] hover:text-[#00913f]"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ── Feature cards (Knasta-style) — only shown without results ── */}
+      {!hasResults && !isLoading && !query && (
+        <section>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {FEATURE_CARDS.map((card) => (
+              <button
+                key={card.title}
+                onClick={() => fireQuery(card.q)}
+                className="group flex flex-col items-start gap-2 rounded-xl border border-border bg-white p-4 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+              >
+                <div
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-xl"
+                  style={{ background: `${card.color}18` }}
+                >
+                  {card.icon}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-[#1a2332] group-hover:text-[#00913f] transition-colors">
+                    {card.title}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
+                    {card.desc}
+                  </p>
+                </div>
+                <span
+                  className="mt-auto text-xs font-semibold"
+                  style={{ color: card.color }}
+                >
+                  Ver ofertas →
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Category pills ─────────────────────────────────────── */}
+      {!hasResults && !isLoading && !query && (
+        <section className="flex flex-wrap gap-2">
+          {CATEGORIES.map(({ label, icon: Icon, q }) => (
             <button
               key={label}
-              type="button"
-              onClick={() => fire(q)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5",
-                "text-xs font-medium text-muted-foreground",
-                "transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
-              )}
+              onClick={() => fireQuery(q)}
+              className="flex items-center gap-1.5 rounded-full border border-border bg-white px-3.5 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:border-[#00913f] hover:text-[#00913f]"
             >
-              <Icon className="h-3 w-3" />
+              <Icon className="h-3.5 w-3.5" />
               {label}
             </button>
           ))}
-        </motion.div>
+        </section>
+      )}
 
-        {/* Recent queries */}
-        <AnimatePresence>
-          {recentQueries.length > 0 && !query && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex flex-wrap justify-center gap-1.5"
-            >
-              <span className="text-xs text-muted-foreground">Recientes:</span>
-              {recentQueries.slice(0, 5).map((q) => (
-                <button
-                  key={q}
-                  onClick={() => fire(q)}
-                  className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                >
-                  {q}
-                </button>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* ── Results ── */}
-      <AnimatePresence mode="wait">
-        {query && (
-          <motion.div
-            key={query + activeStore}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="space-y-4"
-          >
-            {/* Result count + controls bar */}
-            {hasResults && (
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-muted-foreground" aria-live="polite" aria-atomic="true">
-                  <span className="font-medium text-foreground">{search.data!.count}</span>{" "}
-                  resultados para &ldquo;{query}&rdquo;
-                  {search.data?.strategy ? (
-                    <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-[10px]">
-                      {search.data.strategy}
-                    </span>
-                  ) : null}
+      {/* ── Results ────────────────────────────────────────────── */}
+      {(hasResults || isLoading || query) && (
+        <section>
+          {query && (
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-[#1a2332]">
+                  {isLoading
+                    ? `Buscando "${query}"...`
+                    : `${results.length} resultado${results.length !== 1 ? "s" : ""} para "${query}"`}
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  en {activeStore.replace("_", " ").toUpperCase()}
                 </p>
-
-                {/* Sort buttons */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-muted-foreground">Precio:</span>
-                  <button
-                    type="button"
-                    onClick={() => setSortOrder(sortOrder === "asc" ? "default" : "asc")}
-                    className={cn(
-                      "flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
-                      sortOrder === "asc"
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-primary"
-                    )}
-                  >
-                    <ArrowUp01 className="h-3.5 w-3.5" />
-                    Menor
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSortOrder(sortOrder === "desc" ? "default" : "desc")}
-                    className={cn(
-                      "flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
-                      sortOrder === "desc"
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-primary"
-                    )}
-                  >
-                    <ArrowDown01 className="h-3.5 w-3.5" />
-                    Mayor
-                  </button>
-                  {sortOrder !== "default" && (
-                    <button
-                      type="button"
-                      onClick={() => setSortOrder("default")}
-                      className="flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      <ArrowDownUp className="h-3 w-3" />
-                      Relevancia
-                    </button>
-                  )}
-                </div>
               </div>
-            )}
+              <button
+                onClick={() => { setQuery(""); setDraft(""); }}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Limpiar ✕
+              </button>
+            </div>
+          )}
 
-            {/* Filters bar */}
-            {hasResults && (
-              <div className="space-y-2">
-                {/* Active filter count + clear all */}
-                {activeFilterCount > 0 && (
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
-                      {activeFilterCount} filtro{activeFilterCount > 1 ? "s" : ""}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={clearAllFilters}
-                      className="text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Limpiar todo
-                    </button>
-                  </div>
-                )}
+          {/* Error / warning from scraper */}
+          {(isError || searchWarning) && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              {isError
+                ? "⚠️ No se pudo conectar con la tienda. Verifica tu conexión e intenta de nuevo."
+                : `⚠️ ${searchWarning}`}
+            </div>
+          )}
 
-                {/* Brand chips */}
-                {brands.length > 1 && (
-                  <div role="group" aria-label="Filtrar por marca" className="flex flex-wrap gap-1.5">
-                    {brandFilter && (
-                      <button type="button" onClick={() => setBrandFilter(null)}
-                        aria-pressed="true"
-                        className="rounded-full border border-primary bg-primary/10 px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/20">
-                        ✕ {brandFilter}
-                      </button>
-                    )}
-                    {brands.slice(0, 8).map(({ name, count }) =>
-                      name && name !== brandFilter ? (
-                        <button key={name} type="button" onClick={() => setBrandFilter(name)}
-                          aria-pressed="false"
-                          className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                            "border-border bg-background text-muted-foreground",
-                            "hover:border-primary/40 hover:bg-primary/5 hover:text-primary")}>
-                          {name}<span className="ml-1 text-[10px] opacity-60">{count}</span>
-                        </button>
-                      ) : null
-                    )}
-                  </div>
-                )}
-
-                {/* Category chips */}
-                {categories.length > 1 && (
-                  <div role="group" aria-label="Filtrar por categoría" className="flex flex-wrap gap-1.5">
-                    {categoryFilter && (
-                      <button type="button" onClick={() => setCategoryFilter(null)}
-                        aria-pressed="true"
-                        className="rounded-full border border-secondary bg-secondary/10 px-3 py-1 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/20">
-                        ✕ {categoryFilter}
-                      </button>
-                    )}
-                    {categories.slice(0, 6).map(({ name, count }) =>
-                      name && name !== categoryFilter ? (
-                        <button key={name} type="button" onClick={() => setCategoryFilter(name)}
-                          aria-pressed="false"
-                          className={cn("rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                            "border-border/60 bg-muted text-muted-foreground",
-                            "hover:border-secondary/40 hover:bg-secondary/5 hover:text-secondary-foreground")}>
-                          {name}<span className="ml-1 text-[10px] opacity-60">{count}</span>
-                        </button>
-                      ) : null
-                    )}
-                  </div>
-                )}
-
-                {/* Price range */}
-                {facetPriceMin != null && facetPriceMax != null && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>Precio:</span>
-                    <input
-                      type="number"
-                      placeholder={`Mín ($${facetPriceMin.toLocaleString("es-CL")})`}
-                      className="w-28 rounded-md border border-border bg-background px-2 py-1 text-xs"
-                      value={priceRange ? priceRange[0] : ""}
-                      onChange={(e) => {
-                        const min = Number(e.target.value) || facetPriceMin;
-                        setPriceRange([min, priceRange ? priceRange[1] : facetPriceMax]);
-                      }}
-                    />
-                    <span>—</span>
-                    <input
-                      type="number"
-                      placeholder={`Máx ($${facetPriceMax.toLocaleString("es-CL")})`}
-                      className="w-28 rounded-md border border-border bg-background px-2 py-1 text-xs"
-                      value={priceRange ? priceRange[1] : ""}
-                      onChange={(e) => {
-                        const max = Number(e.target.value) || facetPriceMax;
-                        setPriceRange([priceRange ? priceRange[0] : facetPriceMin, max]);
-                      }}
-                    />
-                    {priceRange && (
-                      <button type="button" onClick={() => setPriceRange(null)}
-                        className="text-xs text-muted-foreground hover:text-foreground">✕</button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <ProductGrid
-              products={filteredSorted}
-              isLoading={search.isFetching}
-              emptyQuery={query}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </section>
+          <ProductGrid
+            products={results}
+            isLoading={isLoading}
+            emptyQuery={!searchWarning ? query : undefined}
+          />
+        </section>
+      )}
+    </div>
   );
 }

@@ -3,29 +3,32 @@
 @tailwind utilities;
 
 @layer base {
-  /* ── Light mode (default) ──────────────────────────────────── */
+  /* ── Light mode — Knasta palette ───────────────────────────── */
   :root {
-    --background: 0 0% 97%;
-    --foreground: 215 25% 12%;
+    --background: 220 14% 96%;        /* #f2f3f5 light gray */
+    --foreground: 214 31% 15%;        /* #1a2332 navy */
     --card: 0 0% 100%;
-    --card-foreground: 215 25% 12%;
-    --primary: 161 85% 26%;          /* #0a7c5c */
+    --card-foreground: 214 31% 15%;
+    --primary: 142 100% 28%;          /* #00913f Knasta green */
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 17% 93%;
-    --secondary-foreground: 215 25% 20%;
-    --muted: 210 17% 93%;
+    --secondary: 214 31% 15%;         /* navy for secondary elements */
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 14% 92%;
     --muted-foreground: 215 16% 47%;
-    --accent: 210 17% 90%;
-    --accent-foreground: 215 25% 12%;
+    --accent: 142 60% 92%;            /* light green tint */
+    --accent-foreground: 142 100% 22%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 161 85% 26%;
+    --border: 220 14% 88%;
+    --input: 0 0% 100%;
+    --ring: 142 100% 28%;
     --radius: 0.5rem;
-    --success: 142 71% 35%;
+    --success: 142 100% 28%;
     --warning: 38 92% 50%;
     --info: 210 97% 57%;
+    --navy: 214 31% 15%;              /* #1a2332 header navy */
+    --navy-foreground: 0 0% 100%;
+    --offer: 0 84% 55%;               /* red for offer badge */
   }
 
   /* ── Dark mode ─────────────────────────────────────────────── */

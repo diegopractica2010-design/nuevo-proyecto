@@ -18,6 +18,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
+      "Accept": "application/json",
       "Content-Type": "application/json",
       ...getAuthHeader(),
       ...init?.headers
