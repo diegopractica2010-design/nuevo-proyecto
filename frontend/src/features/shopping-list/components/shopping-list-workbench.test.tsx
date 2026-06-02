@@ -15,6 +15,7 @@ vi.mock("framer-motion", () => ({
 
 vi.mock("@/hooks/use-shopping-list", () => ({
   useShoppingListCompare: () => ({
+    mutate: vi.fn(),
     mutateAsync: vi.fn(),
     isPending: false,
     data: null,
@@ -26,9 +27,7 @@ import { ShoppingListWorkbench } from "./shopping-list-workbench";
 describe("ShoppingListWorkbench", () => {
   it("renders empty state correctly", () => {
     render(<ShoppingListWorkbench />);
-    expect(
-      screen.getByPlaceholderText(/leche/i) || screen.getByRole("textbox")
-    ).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
   });
 
   it("adds item on textarea input + button click", async () => {

@@ -29,6 +29,20 @@ class APITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.headers["content-type"])
 
+    def test_exported_frontend_page_is_served(self):
+        response = self.client.get("/profile", headers={"Accept": "text/html"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.headers["content-type"])
+
+    def test_baskets_html_navigation_does_not_hit_json_api(self):
+        response = self.client.get("/baskets", headers={"Accept": "text/html"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.headers["content-type"])
+
+    def test_baskets_json_api_still_requires_auth(self):
+        response = self.client.get("/baskets", headers={"Accept": "application/json"})
+        self.assertEqual(response.status_code, 401)
+
     @patch("backend.main.search_products", new_callable=AsyncMock)
     def test_search_endpoint_success(self, mock_search):
         mock_search.return_value = {

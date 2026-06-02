@@ -8,6 +8,9 @@ const mockAddToCart = vi.fn();
 vi.mock("framer-motion", () => ({
   motion: {
     div: ({ children, ...rest }: React.HTMLAttributes<HTMLDivElement>) => <div {...rest}>{children}</div>,
+    button: ({ children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+      <button {...rest}>{children}</button>
+    ),
   },
   AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));

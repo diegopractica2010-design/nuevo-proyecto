@@ -1,14 +1,6 @@
 "use client";
 
-// Required for next build with output: "export" — dynamic product IDs are
-// not known at build time; the empty array tells Next.js to skip SSG for this
-// route without failing the build. The page loads fully client-side at runtime.
-export function generateStaticParams() {
-  return [];
-}
-
-import { Suspense } from "react";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/services/api-client";
 import type { StoreId } from "@/types/api";
@@ -18,18 +10,26 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-function ProductDetailContent() {
-  const params = useParams<{ id: string }>();
+export function ProductDetailClient() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const store = (searchParams.get("store") ?? "lider") as StoreId;
-  const productId = decodeURIComponent(params.id);
+  const productId = searchParams.get("id") ?? "";
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["price-history", productId, store],
     queryFn: () => apiClient.getPriceHistory(productId, store),
+    enabled: !!productId,
     retry: 1,
   });
+
+  if (!productId) {
+    return (
+      <div className="mx-auto max-w-3xl p-6">
+        <Alert variant="destructive">Falta el identificador del producto.</Alert>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -44,10 +44,14 @@ function ProductDetailContent() {
   if (isError) {
     return (
       <div className="p-6 space-y-4">
-        <Button variant="outline" onClick={() => router.back()}>← Volver</Button>
+        <Button variant="outline" onClick={() => router.back()}>
+          Volver
+        </Button>
         <Alert variant="destructive">
           <p>{(error as Error)?.message ?? "No se pudo cargar el historial de precios."}</p>
-          <Button size="sm" className="mt-2" onClick={() => refetch()}>Reintentar</Button>
+          <Button size="sm" className="mt-2" onClick={() => refetch()}>
+            Reintentar
+          </Button>
         </Alert>
       </div>
     );
@@ -58,34 +62,35 @@ function ProductDetailContent() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
-      <Button variant="outline" onClick={() => router.back()}>← Volver a la búsqueda</Button>
+      <Button variant="outline" onClick={() => router.back()}>
+        Volver a la busqueda
+      </Button>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">
-            {history[0]?.store ? `${store.toUpperCase()} — ` : ""}
-            Historial de precios
-          </CardTitle>
+          <CardTitle className="text-xl">Historial de precios</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {trends && (
-            <div className="grid grid-cols-3 gap-4 text-center">
+            <div className="grid grid-cols-1 gap-4 text-center sm:grid-cols-3">
               <div>
                 <p className="text-sm text-muted-foreground">Precio actual</p>
                 <p className="text-lg font-bold">
-                  {trends.current_price != null ? `$${trends.current_price.toLocaleString("es-CL")}` : "—"}
+                  {trends.current_price != null
+                    ? `$${trends.current_price.toLocaleString("es-CL")}`
+                    : "-"}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Mínimo</p>
+                <p className="text-sm text-muted-foreground">Minimo</p>
                 <p className="text-lg font-semibold text-green-600">
-                  {trends.min_price != null ? `$${trends.min_price.toLocaleString("es-CL")}` : "—"}
+                  {trends.min_price != null ? `$${trends.min_price.toLocaleString("es-CL")}` : "-"}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Máximo</p>
+                <p className="text-sm text-muted-foreground">Maximo</p>
                 <p className="text-lg font-semibold text-red-500">
-                  {trends.max_price != null ? `$${trends.max_price.toLocaleString("es-CL")}` : "—"}
+                  {trends.max_price != null ? `$${trends.max_price.toLocaleString("es-CL")}` : "-"}
                 </p>
               </div>
             </div>
@@ -94,25 +99,12 @@ function ProductDetailContent() {
       </Card>
 
       {history.length > 0 ? (
-        <PriceHistoryChart history={history} />
+        <PriceHistoryChart product_id={productId} store={store} />
       ) : (
         <Alert>
-          <p>No hay registros de historial para este producto aún.</p>
+          <p>No hay registros de historial para este producto aun.</p>
         </Alert>
       )}
     </div>
-  );
-}
-
-export default function ProductDetailPage() {
-  return (
-    <Suspense fallback={
-      <div className="p-6 space-y-4">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    }>
-      <ProductDetailContent />
-    </Suspense>
   );
 }

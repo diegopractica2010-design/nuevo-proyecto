@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8001")
     
     # Database
     DATABASE_URL: str = os.getenv(
@@ -40,6 +41,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "60"))
     RATE_LIMIT_BURST_SIZE: int = int(os.getenv("RATE_LIMIT_BURST_SIZE", "15"))
     RATE_LIMIT_WINDOW_SECONDS: int = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+
+    # Auth
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "")
+    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    JWT_EXPIRATION_MINUTES: int = int(os.getenv("JWT_EXPIRATION_MINUTES", "30"))
     
     # CORS
     _CORS_ENV = os.getenv("CORS_ORIGINS", "")
@@ -256,7 +262,11 @@ DATABASE_URL = settings.DATABASE_URL
 ENVIRONMENT = settings.ENVIRONMENT
 DEBUG = settings.DEBUG
 LOG_LEVEL = settings.LOG_LEVEL
+BASE_URL = settings.BASE_URL
 CORS_ORIGINS = settings.CORS_ORIGINS
+JWT_SECRET_KEY = settings.JWT_SECRET_KEY
+JWT_ALGORITHM = settings.JWT_ALGORITHM
+JWT_EXPIRATION_MINUTES = settings.JWT_EXPIRATION_MINUTES
 SEARCH_URL = settings.SEARCH_URL
 SLUG_URL = settings.SLUG_URL
 AUTOCOMPLETE_URL = settings.AUTOCOMPLETE_URL

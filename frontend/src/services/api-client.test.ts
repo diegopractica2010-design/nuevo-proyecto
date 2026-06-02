@@ -9,6 +9,7 @@ const { apiClient } = await import("./api-client");
 describe("apiClient", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal("fetch", mockFetch);
     // stub localStorage
     vi.stubGlobal("localStorage", { getItem: () => null });
     vi.stubGlobal("window", { localStorage: { getItem: () => null } });

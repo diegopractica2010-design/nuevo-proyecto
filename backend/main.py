@@ -2,7 +2,7 @@ import logging
 import signal
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -176,12 +176,44 @@ def _ensure_basket_access(basket: Basket, username: Optional[str]) -> None:
         raise HTTPException(status_code=403, detail="Basket belongs to another user")
 
 
+def _safe_frontend_path(relative_path: str):
+    frontend_out = (FRONTEND_DIR / "out").resolve()
+    candidate = (frontend_out / relative_path).resolve()
+    if candidate == frontend_out or frontend_out in candidate.parents:
+        return candidate
+    return None
+
+
+def _frontend_file_response(path: str, *, fallback_index: bool = False) -> FileResponse | None:
+    clean_path = (path or "index").strip().lstrip("/")
+    candidates: list[str] = []
+    if clean_path:
+        candidates.append(clean_path)
+        if "." not in clean_path.rsplit("/", 1)[-1]:
+            candidates.append(f"{clean_path}.html")
+            candidates.append(f"{clean_path}/index.html")
+    if fallback_index:
+        candidates.append("index.html")
+
+    for relative in candidates:
+        candidate = _safe_frontend_path(relative)
+        if candidate and candidate.is_file():
+            return FileResponse(candidate)
+    return None
+
+
+def _request_wants_html(request: Request) -> bool:
+    accept = request.headers.get("accept", "")
+    return "text/html" in accept and "application/json" not in accept
+
+
 @app.get("/", include_in_schema=False)
 def index():
     logger.info("Serving index page")
-    next_index = FRONTEND_DIR / "out" / "index.html"
-    legacy_index = FRONTEND_DIR / "index.html"
-    return FileResponse(next_index if next_index.exists() else legacy_index)
+    response = _frontend_file_response("index", fallback_index=True)
+    if response:
+        return response
+    raise HTTPException(status_code=503, detail="Frontend build not available. Run npm run build in frontend/")
 
 
 @app.get("/health", include_in_schema=False)
@@ -330,10 +362,15 @@ def create_basket(
 
 @app.get("/baskets", response_model=PaginatedBaskets)
 def get_baskets(
-    authorization: str = Header(...),
+    request: Request,
+    authorization: Optional[str] = Header(None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
+    if _request_wants_html(request):
+        response = _frontend_file_response("baskets")
+        if response:
+            return response
     username = _username_from_authorization(authorization, required=True)
     logger.info(f"Getting baskets for user: {username}")
     return BasketService.get_user_baskets(username, limit=limit, offset=offset)
@@ -824,6 +861,14 @@ async def test_alert(username: str = Depends(require_admin)):
     if sent:
         return {"status": "sent", "message": "Test alert sent to Slack successfully"}
     return {"status": "failed", "message": "Failed to send alert — check SLACK_WEBHOOK_URL in config"}
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def frontend_static(full_path: str):
+    response = _frontend_file_response(full_path)
+    if response:
+        return response
+    raise HTTPException(status_code=404, detail="Not Found")
 
 
 # ============================================================================

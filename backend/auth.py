@@ -11,6 +11,7 @@ from fastapi import Header, HTTPException
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
+from backend.config import get_settings
 from backend.db import SessionLocal
 from backend.infrastructure.db.models import UserRecord
 from backend.infrastructure.cache.cache import _get_client
@@ -121,14 +122,15 @@ def is_token_revoked(jti: str) -> bool:
 
 def _get_secret_key() -> str:
     """Obtener JWT_SECRET_KEY desde entorno o generar una temporal en desarrollo."""
-    secret = os.getenv("JWT_SECRET_KEY") or os.getenv("SECRET_KEY")
+    settings = get_settings()
+    secret = settings.JWT_SECRET_KEY or os.getenv("SECRET_KEY")
     if secret:
         if len(secret) < 32:
             raise ValueError("JWT_SECRET_KEY debe tener al menos 32 caracteres")
         logger.info("JWT_SECRET_KEY configured and fixed (from environment)")
         return secret
 
-    env = os.getenv("ENVIRONMENT", "development")
+    env = settings.ENVIRONMENT
     if env == "production":
         raise RuntimeError(
             "JWT_SECRET_KEY no esta configurado. "
@@ -145,8 +147,8 @@ def _get_secret_key() -> str:
 
 
 SECRET_KEY = _get_secret_key()
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ALGORITHM = get_settings().JWT_ALGORITHM
+ACCESS_TOKEN_EXPIRE_MINUTES = get_settings().JWT_EXPIRATION_MINUTES
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -189,9 +191,7 @@ class AuthService:
                 return None
             if not pwd_context.verify(password, user.hashed_password):
                 return None
-            import os as _os
-            env = _os.getenv("ENVIRONMENT", "development")
-            if env == "production" and not getattr(user, "is_verified", True):
+            if get_settings().ENVIRONMENT == "production" and not getattr(user, "is_verified", True):
                 # In production, unverified users cannot log in.
                 # In development/test, skip the check so new registrations work
                 # without having to click a verification link.
