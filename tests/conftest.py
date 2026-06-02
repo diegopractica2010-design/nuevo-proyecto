@@ -91,6 +91,7 @@ def test_user(db_session: Session) -> UserRecord:
         email="testuser@example.com",
         hashed_password=pwd_context.hash(_TEST_PASSWORD),
         role="user",
+        is_verified=True,  # required so authenticate_user doesn't reject the user
     )
     db_session.add(user)
     db_session.commit()

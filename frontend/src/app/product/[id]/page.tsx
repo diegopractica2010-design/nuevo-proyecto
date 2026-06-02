@@ -1,5 +1,12 @@
 "use client";
 
+// Required for next build with output: "export" — dynamic product IDs are
+// not known at build time; the empty array tells Next.js to skip SSG for this
+// route without failing the build. The page loads fully client-side at runtime.
+export function generateStaticParams() {
+  return [];
+}
+
 import { Suspense } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";

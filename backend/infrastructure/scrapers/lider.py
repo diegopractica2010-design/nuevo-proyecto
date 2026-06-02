@@ -326,63 +326,46 @@ class LiderScraper(BaseScraper):
         return candidates
 
     def _graphql_payloads(self, query: str, page: int) -> list[dict[str, Any]]:
-        """Genera payloads GraphQL para intentar múltiples operaciones."""
-        # Fragment minimal — evita campos que pueden no existir en el schema actual
-        fragment_full = """
-            itemStacks {
-              items {
-                id
-                name
-                brand
-                canonicalUrl
-                image
-                imageInfo { thumbnailUrl allImages { url } }
-                sellerName
-                priceInfo { linePrice itemPrice wasPrice unitPrice savings savingsAmt }
-                availabilityStatusV2 { value display }
-                badges { text key type }
+        """Genera payloads GraphQL.
+
+        El schema actual (investigado 2026-05-30) requiere prg: Prg! (obligatorio).
+        La estructura de respuesta es: search → searchResult → itemStacks → items.
+        Los campos de priceInfo son objetos anidados — se omiten y se obtiene el
+        precio del HTML fallback que ya funciona correctamente.
+        """
+        # prg es argumento REQUERIDO (tipo Prg!) — confirmado por introspección
+        base_vars = {"query": query, "page": page, "prg": "desktop"}
+
+        # Fragment sin priceInfo (los sub-campos de ProductPrice son desconocidos)
+        fragment = """
+            searchResult {
+              itemStacks {
+                items {
+                  id
+                  name
+                  brand
+                  canonicalUrl
+                  sellerName
+                  availabilityStatusV2 { value display }
+                }
               }
             }
         """
-        fragment_minimal = """
-            itemStacks {
-              items {
-                id
-                name
-                brand
-                image
-                priceInfo { linePrice itemPrice wasPrice }
-              }
-            }
-        """
-        base_vars = {"query": query, "page": page}
-        vars_with_sort = {**base_vars, "sort": "best_match"}
         return [
-            # Intento 1: getSearch con sort (más campos)
             {
                 "operationName": "getSearch",
-                "variables": vars_with_sort,
+                "variables": {**base_vars, "sort": "best_match"},
                 "query": (
-                    "query getSearch($query: String, $page: Int, $sort: String) "
-                    f"{{ search(query: $query, page: $page, sort: $sort) {{ {fragment_full} }} }}"
+                    "query getSearch($query: String, $page: Int, $prg: Prg!, $sort: String) "
+                    f"{{ search(query: $query, page: $page, prg: $prg, sort: $sort) {{ {fragment} }} }}"
                 ),
             },
-            # Intento 2: getSearch sin sort (más compatible)
             {
                 "operationName": "getSearch",
                 "variables": base_vars,
                 "query": (
-                    "query getSearch($query: String, $page: Int) "
-                    f"{{ search(query: $query, page: $page) {{ {fragment_full} }} }}"
-                ),
-            },
-            # Intento 3: searchResult con variables mínimas
-            {
-                "operationName": "getSearchPage",
-                "variables": base_vars,
-                "query": (
-                    "query getSearchPage($query: String, $page: Int) "
-                    f"{{ searchResult(query: $query, page: $page) {{ {fragment_minimal} }} }}"
+                    "query getSearch($query: String, $page: Int, $prg: Prg!) "
+                    f"{{ search(query: $query, page: $page, prg: $prg) {{ {fragment} }} }}"
                 ),
             },
         ]

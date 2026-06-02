@@ -90,6 +90,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-redis123}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/1
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/2
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-cambia-esto-en-produccion-32chars!!}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       PYTHONPATH: /app
@@ -116,6 +117,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-redis123}
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/1
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-redis123}@redis:6379/2
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-cambia-esto-en-produccion-32chars!!}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       PYTHONPATH: /app

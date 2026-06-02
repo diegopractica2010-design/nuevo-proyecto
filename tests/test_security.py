@@ -39,12 +39,17 @@ def test_headers_de_seguridad_presentes():
 
 
 def test_csp_no_tiene_unsafe_eval():
-    """El CSP no debe permitir eval()."""
+    """El CSP no debe permitir eval(), y debe tener script-src explícito."""
     response = client.get("/")
     csp = response.headers.get("content-security-policy", "")
+    assert csp, "No hay Content-Security-Policy en la respuesta"
+
     script_src = [part for part in csp.split(";") if "script-src" in part]
-    if script_src:
-        assert "unsafe-eval" not in script_src[0], (
-            "El CSP tiene 'unsafe-eval' en script-src. "
-            "Esto permite ejecutar eval() y anula la proteccion contra XSS."
-        )
+    assert script_src, (
+        "El CSP no tiene 'script-src' explícito. "
+        "Sin script-src, 'unsafe-eval' en default-src no sería detectado."
+    )
+    assert "unsafe-eval" not in script_src[0], (
+        "El CSP tiene 'unsafe-eval' en script-src. "
+        "Esto permite ejecutar eval() y anula la proteccion contra XSS."
+    )

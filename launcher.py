@@ -1,6 +1,10 @@
 """
 Entry point for PyInstaller executable.
-Run this file to start the Radar de Precios server.
+Starts the uvicorn API server and opens the browser automatically.
+
+Note: Celery worker/beat cannot run inside a frozen exe because sys.executable
+is the exe itself (not a Python interpreter). Use docker-compose.standalone.yml
+(start.bat) for full Celery support with background tasks.
 """
 import multiprocessing
 import sys
@@ -12,12 +16,12 @@ import webbrowser
 URL = "http://localhost:8001"
 
 
-def _open_browser():
+def _open_browser() -> None:
     """Wait for the server to be ready, then open the browser."""
     time.sleep(3)
     try:
         import urllib.request
-        for _ in range(10):
+        for _ in range(15):
             try:
                 urllib.request.urlopen(URL, timeout=1)
                 break
@@ -28,8 +32,7 @@ def _open_browser():
     webbrowser.open(URL)
 
 
-def main():
-    # When frozen as .exe, ensure the data directory exists next to the exe
+def main() -> None:
     if getattr(sys, 'frozen', False):
         exe_dir = os.path.dirname(sys.executable)
         data_dir = os.path.join(exe_dir, 'data')
@@ -46,9 +49,7 @@ def main():
     print("  Presiona Ctrl+C para detener")
     print("=" * 60 + "\n")
 
-    # Open browser in background after server is ready
     threading.Thread(target=_open_browser, daemon=True).start()
-
     uvicorn.run(app, host="0.0.0.0", port=8001, reload=False, workers=1)
 
 

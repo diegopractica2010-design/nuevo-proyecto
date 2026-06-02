@@ -30,7 +30,7 @@ class SantaIsabelScraper(BaseScraper):
         url = SANTA_ISABEL_SEARCH_URL.format(query=quote_plus(normalized))
         assert_live_store_access_allowed("santa_isabel", url, purpose="search")
 
-        # Estrategia 1: VTEX API pública (más confiable, sin auth)
+        # Estrategia 1: VTEX API pública (sin auth)
         try:
             return await self._try_vtex_api(normalized, limit)
         except Exception as exc:
@@ -42,16 +42,13 @@ class SantaIsabelScraper(BaseScraper):
         except Exception as exc:
             logger.warning("Santa Isabel __NEXT_DATA__ strategy failed: %s", exc)
 
-        # Estrategia 3: Cencosud catalog API (requiere auth — último recurso)
-        try:
-            return await self._try_catalog_api(normalized, limit)
-        except Exception as exc:
-            logger.warning("Santa Isabel catalog API strategy failed: %s", exc)
-            raise NoResultsError(query, message=f"Santa Isabel: no se pudo obtener resultados ({exc})")
+        # Cencosud catalog API requiere auth (401) — no intentar
+        raise NoResultsError(query, message="Santa Isabel: no se encontraron resultados (sitio requiere Playwright)")
 
     async def _try_next_data(self, query: str, url: str, limit: int) -> ScrapedSearchResult:
+        import json  # stdlib — always available
+        import httpx  # optional heavy dep — deferred import
         from backend.config import HTML_HEADER_PROFILES, REQUEST_TIMEOUT, STORE_SSL_VERIFY
-        import httpx, json
         from bs4 import BeautifulSoup
 
         async with httpx.AsyncClient(

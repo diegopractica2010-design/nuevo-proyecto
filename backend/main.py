@@ -24,7 +24,7 @@ from backend.models import SearchResponse
 from backend.search_service import SearchServiceError, _persist_prices, search_products
 from backend.basket_service import BasketService, PriceHistoryService
 from backend.models_baskets import Basket, BasketSummary, PaginatedBaskets
-from backend.auth import ACCESS_TOKEN_EXPIRE_MINUTES, AuthService, TokenService, pwd_context, require_admin, revoke_token, send_verification_email
+from backend.auth import ACCESS_TOKEN_EXPIRE_MINUTES, AuthService, TokenService, pwd_context, require_admin, revoke_token, send_verification_email, send_password_reset_email
 from backend.models_auth import Token, UserCreate, UserLogin, UserResponse
 
 # FASE 4: Import new modules
@@ -259,7 +259,20 @@ async def search(
     q: Optional[str] = Query(None, min_length=1, description="Alias compatible para query"),
     limit: int = Query(100, ge=1, le=MAX_RESULTS, description="Cantidad máxima de resultados"),
     store: str = Query("lider", description="Tienda a buscar: lider, jumbo"),
+    body: Optional[dict] = Body(default=None),
 ):
+    # For POST requests, also accept params from JSON body
+    if body is not None:
+        query = query or body.get("query") or body.get("q")
+        q = q or body.get("q") or body.get("query")
+        if "limit" in body:
+            try:
+                limit = int(body["limit"])
+            except (ValueError, TypeError):
+                pass
+        if "store" in body:
+            store = str(body["store"])
+
     search_query = query or q
     if not search_query:
         raise HTTPException(status_code=422, detail="Query parameter 'query' or 'q' is required")
@@ -306,11 +319,10 @@ async def compare_shopping_list_endpoint(payload: dict = Body(...)):
 @app.post("/baskets", response_model=Basket)
 def create_basket(
     name: str = Body(..., embed=True),
-    user_id: Optional[str] = None,
     authorization: Optional[str] = Header(None),
 ):
     username = _username_from_authorization(authorization)
-    owner_id = username or user_id
+    owner_id = username  # user_id query param removed — was injectable
     logger.info(f"Creating basket: {name}")
     basket = BasketService.create_basket(name, owner_id)
     return basket
@@ -634,7 +646,7 @@ def forgot_password(background: BackgroundTasks, body: dict = Body(...)):
             _get_client().set(f"pwd_reset:{user.username}", token_hash, ex=3600)
         except Exception as exc:
             logger.warning("Could not store pwd_reset in Redis: %s", exc)
-        background.add_task(send_verification_email, user.username, email, reset_token)
+        background.add_task(send_password_reset_email, user.username, email, reset_token)
     return {"detail": "Si ese email existe, recibirás un enlace de restablecimiento."}
 
 
@@ -659,14 +671,20 @@ def reset_password(body: dict = Body(...)):
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     try:
         from backend.infrastructure.cache.cache import _get_client
-        stored = _get_client().get(f"pwd_reset:{username}")
+        client = _get_client()
+        stored = client.get(f"pwd_reset:{username}")
         if not stored or stored != token_hash:
             raise HTTPException(status_code=400, detail="Token ya utilizado o expirado")
-        _get_client().delete(f"pwd_reset:{username}")
+        client.delete(f"pwd_reset:{username}")
     except HTTPException:
         raise
     except Exception as exc:
-        logger.warning("Redis check failed for pwd_reset: %s", exc)
+        # Redis unavailable: fail-closed (reject) — no permitir reset sin verificación
+        logger.error("Redis unavailable for pwd_reset validation: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="El servicio de verificación no está disponible. Intenta de nuevo en unos minutos.",
+        ) from exc
     with SessionLocal() as session:
         user = UserRepository(session).get_by_username(username)
         if not user:
@@ -731,10 +749,11 @@ def backup_status(username: str = Depends(require_admin)):
         backups = []
         for backup_dir in sorted(backup_path.iterdir(), reverse=True)[:10]:
             if backup_dir.is_dir():
+                files = list(backup_dir.glob("*"))
                 backups.append({
                     "timestamp": backup_dir.name,
-                    "files": list(backup_dir.glob("*")),
-                    "size": sum(f.stat().st_size for f in backup_dir.glob("*")),
+                    "files": [str(f.name) for f in files],
+                    "size": sum(f.stat().st_size for f in files),
                 })
         
         return {

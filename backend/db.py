@@ -30,9 +30,19 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
 def init_db() -> None:
-    from backend.infrastructure.db import models  # noqa: F401
+    """Initialize DB tables.
 
-    Base.metadata.create_all(bind=engine)
+    In production (PostgreSQL + Alembic), migrations handle the schema —
+    create_all would conflict and is skipped.  In SQLite (dev/exe), we create
+    tables directly because alembic upgrade head runs separately (or not at all
+    in the standalone exe mode).
+    """
+    from backend.infrastructure.db import models  # noqa: F401
+    import os
+
+    db_url = os.getenv("DATABASE_URL", DATABASE_URL)
+    if db_url.startswith("sqlite"):
+        Base.metadata.create_all(bind=engine)
 
 
 def get_db():

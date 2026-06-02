@@ -19,6 +19,47 @@ from backend.repositories import UserRepository
 logger = logging.getLogger(__name__)
 
 
+def send_password_reset_email(username: str, email: str, token: str) -> None:
+    """Send password reset email (distinct from email verification)."""
+    import os
+    import smtplib
+    from email.mime.text import MIMEText
+
+    base_url = os.getenv("BASE_URL", "http://localhost:8001")
+    reset_url = f"{base_url}/reset-password?token={token}"
+    environment = os.getenv("ENVIRONMENT", "development")
+
+    if environment == "development":
+        logger.info("DEV — password reset URL for %s: %s", username, reset_url)
+        return
+
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER", "")
+    smtp_password = os.getenv("SMTP_PASSWORD", "")
+    smtp_from = os.getenv("SMTP_FROM", smtp_user)
+
+    body = (
+        f"Hola {username},\n\n"
+        f"Recibimos una solicitud para restablecer tu contraseña.\n"
+        f"Haz clic en el enlace (válido 1 hora):\n{reset_url}\n\n"
+        "Si no solicitaste esto, ignora este correo."
+    )
+    msg = MIMEText(body)
+    msg["Subject"] = "Restablecer contraseña — Radar de Precios"
+    msg["From"] = smtp_from
+    msg["To"] = email
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            if smtp_user:
+                server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+    except Exception as exc:
+        logger.error("Failed to send password reset email to %s: %s", email, exc)
+
+
 def send_verification_email(username: str, email: str, token: str) -> None:
     """Send verification email. In development, only log the URL."""
     import os
@@ -147,6 +188,13 @@ class AuthService:
             if not user:
                 return None
             if not pwd_context.verify(password, user.hashed_password):
+                return None
+            import os as _os
+            env = _os.getenv("ENVIRONMENT", "development")
+            if env == "production" and not getattr(user, "is_verified", True):
+                # In production, unverified users cannot log in.
+                # In development/test, skip the check so new registrations work
+                # without having to click a verification link.
                 return None
             session.expunge(user)
             return user

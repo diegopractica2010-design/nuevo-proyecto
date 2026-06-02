@@ -22,14 +22,21 @@ logger = logging.getLogger(__name__)
 UNIMARC_BASE = "https://www.unimarc.cl"
 UNIMARC_SEARCH_URL = "https://www.unimarc.cl/search?text={query}"
 UNIMARC_API_URL = "https://api.unimarc.cl/api/search"
-PLAYWRIGHT_ENABLED: bool = os.getenv("PLAYWRIGHT_ENABLED", "false").lower() == "true"
+
+# Read from config to stay consistent with the rest of the app
+try:
+    from backend.config import PLAYWRIGHT_ENABLED
+except ImportError:
+    PLAYWRIGHT_ENABLED: bool = os.getenv("PLAYWRIGHT_ENABLED", "false").lower() == "true"
 
 
 class UnimarcScraper(BaseScraper):
 
     async def search(self, query: str, *, limit: int = 40) -> ScrapedSearchResult:
         from backend.compliance import assert_live_store_access_allowed
-        assert_live_store_access_allowed("unimarc", UNIMARC_API_URL, purpose="search")
+        from urllib.parse import quote_plus as _qp
+        search_url = UNIMARC_SEARCH_URL.format(query=_qp(query))
+        assert_live_store_access_allowed("unimarc", search_url, purpose="search")
 
         try:
             return await self._try_api(query, limit)
@@ -92,7 +99,7 @@ class UnimarcScraper(BaseScraper):
             "image": raw.get("imageUrl") or raw.get("image") or "",
             "url": raw.get("url") or "",
             "sku": str(raw.get("id") or raw.get("sku") or ""),
-            "in_stock": raw.get("available", True),
+            "in_stock": bool(raw.get("available", False)),  # default False: don't show OOS as available
             "source": "unimarc",
         }
 

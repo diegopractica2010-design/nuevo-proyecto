@@ -25,8 +25,8 @@ export PYTHONPATH=$(pwd)
 
 # Verificar dependencias
 echo "🔍 Verificando dependencias..."
-python -c "import fastapi, uvicorn, requests, bs4" || {
-    echo "❌ Faltan dependencias. Ejecuta: pip install -e ."
+python -c "import fastapi, uvicorn, httpx, bs4, celery, sqlalchemy, alembic" || {
+    echo "❌ Faltan dependencias. Ejecuta: pip install -r requirements.txt"
     exit 1
 }
 

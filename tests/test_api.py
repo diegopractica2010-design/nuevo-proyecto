@@ -1,15 +1,22 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.db import reset_db
+
+# Note: each test method creates a TestClient per instance.
+# TestClient uses the real DB (SQLite in-memory configured in conftest.py via
+# DATABASE_URL env var). For full isolation, use the async `client` fixture
+# from conftest.py in pytest-based tests instead.
 
 
 class APITests(unittest.TestCase):
     def setUp(self):
-        reset_db()
+        # No reset_db() — it drops all tables and breaks isolation with other
+        # tests. TestClient shares the in-memory SQLite configured at process
+        # start, which is populated via Alembic in the conftest engine fixture.
         self.client = TestClient(app)
 
     def test_health_endpoint(self):

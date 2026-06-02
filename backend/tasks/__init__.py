@@ -94,9 +94,15 @@ def cleanup_cache(self) -> dict:
         from backend.infrastructure.cache.cache import _get_client
 
         client = _get_client()
-        pattern = "api:search:*"
-        keys = client.keys(pattern)
-        deleted = client.delete(*keys) if keys else 0
+        # Scan instead of KEYS to avoid blocking Redis on large datasets
+        deleted = 0
+        cursor = 0
+        while True:
+            cursor, keys = client.scan(cursor, match="search:*", count=200)
+            if keys:
+                deleted += client.delete(*keys)
+            if cursor == 0:
+                break
         logger.info("Cache limpiado: %d claves eliminadas", deleted)
         return {
             "status": "success",

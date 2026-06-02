@@ -63,6 +63,16 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   logout: () => {
+    // Revoke token server-side so it cannot be reused after logout
+    const token = localStorage.getItem("auth_token");
+    if (token) {
+      fetch("/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {
+        // Silent — local state is cleared regardless of server response
+      });
+    }
     localStorage.removeItem("auth_token");
     localStorage.removeItem("auth_username");
     set({ authToken: null, authUsername: null });
