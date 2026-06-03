@@ -35,8 +35,11 @@ const STORE_COLORS: Record<string, string> = {
 // ── Radar wordmark ─────────────────────────────────────────────────────────
 
 function RadarWordmark() {
+  // Plain anchor (not next/link) so clicking always does a full navigation to
+  // home and resets the page — including clearing an active search when the
+  // user is already on "/". A SPA Link to the same route would be a no-op.
   return (
-    <Link href="/" className="flex items-center gap-2 select-none shrink-0">
+    <a href="/" className="flex items-center gap-2 select-none shrink-0">
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#00913f]">
         <svg className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -51,7 +54,7 @@ function RadarWordmark() {
         <span className="text-base font-bold tracking-tight text-white">Radar</span>
         <span className="ml-1 text-xs text-white/60">de Precios</span>
       </div>
-    </Link>
+    </a>
   );
 }
 

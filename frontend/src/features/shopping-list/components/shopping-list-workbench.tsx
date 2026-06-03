@@ -125,7 +125,7 @@ function exportTxt(items: CompareItemResult[]) {
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-const STARTER = `arroz 1 kilo\nleche entera 1 litro\naceite 1 litro\ndetergente ropa\npapel higiénico`;
+const STARTER = `arroz\nleche\naceite\ndetergente\nconfort`;
 
 export function ShoppingListWorkbench() {
   const [value, setValue] = useState(STARTER);

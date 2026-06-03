@@ -38,6 +38,19 @@ def main() -> None:
         data_dir = os.path.join(exe_dir, 'data')
         os.makedirs(data_dir, exist_ok=True)
         os.makedirs(os.path.join(data_dir, 'backups'), exist_ok=True)
+        # Load the bundled .env into the environment BEFORE importing backend
+        # config. PyInstaller puts datas under sys._MEIPASS; the exe's CWD has no
+        # .env, so without this JUMBO_API_KEY (and other keys) would be empty and
+        # Jumbo search would silently return nothing.
+        try:
+            from dotenv import load_dotenv
+            meipass = getattr(sys, '_MEIPASS', exe_dir)
+            for env_path in (os.path.join(meipass, '.env'), os.path.join(exe_dir, '.env')):
+                if os.path.exists(env_path):
+                    load_dotenv(env_path)
+                    break
+        except Exception:
+            pass
 
     import uvicorn
     from backend.main import app
