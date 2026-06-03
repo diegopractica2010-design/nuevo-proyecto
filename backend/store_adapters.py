@@ -26,6 +26,9 @@ class StoreAdapter:
     description: str = ""
     country: str = "CL"
     currency: str = "CLP"
+    # Stores whose only working fetch path is a headless browser. They are
+    # excluded from multi-store comparisons unless PLAYWRIGHT_ENABLED=true.
+    requires_playwright: bool = False
 
 
 async def _lider_search(query: str, limit: int) -> ScrapedSearchResult:
@@ -67,7 +70,7 @@ STORE_ADAPTERS: dict[str, StoreAdapter] = {
         name="jumbo",
         display_name="Jumbo",
         search=_jumbo_search,
-        experimental=True,
+        experimental=False,
         url="https://www.jumbo.cl",
         logo_url="/static/logos/jumbo.svg",
         description="Supermercado Cencosud Chile",
@@ -78,12 +81,13 @@ STORE_ADAPTERS: dict[str, StoreAdapter] = {
         name="santa_isabel",
         display_name="Santa Isabel",
         search=_santa_isabel_search,
-        experimental=True,
+        experimental=False,
         url="https://www.santaisabel.cl",
         logo_url="/static/logos/santa_isabel.svg",
         description="Supermercado Cencosud Chile (descuentos)",
         country="CL",
         currency="CLP",
+        # Works over plain HTTP via the BFF catalog/plp API (apiKey in config).
     ),
     "acuenta": StoreAdapter(
         name="acuenta",
@@ -95,6 +99,10 @@ STORE_ADAPTERS: dict[str, StoreAdapter] = {
         description="Formato descuento Walmart Chile",
         country="CL",
         currency="CLP",
+        # acuenta.cl is client-rendered and exposes no products over plain HTTP
+        # (its GraphQL is shared with Lider but priced from HTML, which is empty).
+        # Only a headless browser can read it.
+        requires_playwright=True,
     ),
     "tottus": StoreAdapter(
         name="tottus",
@@ -106,6 +114,7 @@ STORE_ADAPTERS: dict[str, StoreAdapter] = {
         description="Supermercado Falabella Chile",
         country="CL",
         currency="CLP",
+        requires_playwright=True,
     ),
     "unimarc": StoreAdapter(
         name="unimarc",
@@ -117,6 +126,7 @@ STORE_ADAPTERS: dict[str, StoreAdapter] = {
         description="Supermercado SMU Chile (requiere PLAYWRIGHT_ENABLED para anti-bot)",
         country="CL",
         currency="CLP",
+        requires_playwright=True,
     ),
 }
 
@@ -127,3 +137,18 @@ def get_store_adapter(store: str) -> StoreAdapter | None:
 
 def list_stores() -> list[StoreAdapter]:
     return list(STORE_ADAPTERS.values())
+
+
+def comparable_stores() -> tuple[str, ...]:
+    """Stores usable in a multi-store comparison.
+
+    Only fast HTTP-API stores are included. Playwright-backed stores launch a
+    headless browser per query (5-40s each); running them across a multi-item
+    shopping list would make the compare unusably slow, so they are excluded
+    here and remain available only in the single-store search.
+    """
+    return tuple(
+        name
+        for name, adapter in STORE_ADAPTERS.items()
+        if not adapter.requires_playwright
+    )

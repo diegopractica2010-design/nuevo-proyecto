@@ -8,8 +8,6 @@ QUERY_STOPWORDS: frozenset[str] = frozenset(
         "del",
         "el",
         "en",
-        "fideo",
-        "fideos",
         "la",
         "las",
         "los",

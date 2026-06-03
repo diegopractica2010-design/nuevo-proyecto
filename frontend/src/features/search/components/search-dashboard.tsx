@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { Search, ShoppingBasket, Milk, Wheat, Wind, Coffee, Apple, Beef } from "lucide-react";
+import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { Search, ShoppingBasket, Milk, Wheat, Wind, Coffee, Apple, Beef, ArrowDownNarrowWide, ArrowUpNarrowWide } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSearchProducts } from "@/hooks/use-search-products";
 import { useAppStore } from "@/stores/use-app-store";
@@ -12,47 +12,15 @@ import { StoreTabs } from "@/components/layout/app-shell";
 // ── Category quick-searches ────────────────────────────────────────────────
 
 const CATEGORIES = [
-  { label: "Leche",      icon: Milk,           q: "leche entera 1 litro" },
-  { label: "Arroz",      icon: Wheat,          q: "arroz 1 kilo"         },
-  { label: "Aceite",     icon: Coffee,         q: "aceite vegetal 1 litro"},
-  { label: "Detergente", icon: Wind,           q: "detergente ropa"      },
-  { label: "Fruta",      icon: Apple,          q: "manzana roja kilo"    },
-  { label: "Carne",      icon: Beef,           q: "pechuga de pollo kilo"},
-  { label: "Canasta",    icon: ShoppingBasket, q: "pasta fideos"         },
+  { label: "Leche",      icon: Milk,           q: "leche entera"   },
+  { label: "Arroz",      icon: Wheat,          q: "arroz grado 2"  },
+  { label: "Aceite",     icon: Coffee,         q: "aceite vegetal" },
+  { label: "Detergente", icon: Wind,           q: "detergente"     },
+  { label: "Fruta",      icon: Apple,          q: "manzana"        },
+  { label: "Carne",      icon: Beef,           q: "pollo"          },
+  { label: "Canasta",    icon: ShoppingBasket, q: "fideos"         },
 ];
 
-// ── Feature cards (Knasta-style) ───────────────────────────────────────────
-
-const FEATURE_CARDS = [
-  {
-    icon: "🔥",
-    title: "Ofertas del día",
-    desc: "Las mejores bajas de precio de las últimas horas",
-    q: "oferta",
-    color: "#ff6b35",
-  },
-  {
-    icon: "🛒",
-    title: "Despensa básica",
-    desc: "Arroz, aceite, fideos y más al mejor precio",
-    q: "arroz 1 kilo",
-    color: "#00913f",
-  },
-  {
-    icon: "🥛",
-    title: "Lácteos",
-    desc: "Leche, yogur, queso y mantequilla",
-    q: "leche entera",
-    color: "#4a90d9",
-  },
-  {
-    icon: "🧴",
-    title: "Limpieza",
-    desc: "Detergentes y artículos de aseo del hogar",
-    q: "detergente limpieza hogar",
-    color: "#9b59b6",
-  },
-];
 
 // ── Rotating placeholders ──────────────────────────────────────────────────
 
@@ -74,6 +42,37 @@ function useCyclingPlaceholder(strings: string[], ms = 2800) {
   return strings[idx];
 }
 
+// Isolated so the cycling interval doesn't re-render the whole dashboard
+function CyclingInput({
+  inputRef,
+  value,
+  onChange,
+}: {
+  inputRef: RefObject<HTMLInputElement | null>;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const placeholder = useCyclingPlaceholder(PLACEHOLDERS);
+  return (
+    <div className="relative flex-1">
+      <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <input
+        ref={inputRef}
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={cn(
+          "h-12 w-full rounded-xl border border-border bg-[#f8f9fa] pl-10 pr-4",
+          "text-sm text-foreground placeholder:text-muted-foreground",
+          "focus:border-[#00913f] focus:outline-none focus:ring-2 focus:ring-[#00913f]/20",
+          "transition-all duration-200"
+        )}
+      />
+    </div>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function SearchDashboard() {
@@ -83,12 +82,21 @@ export function SearchDashboard() {
 
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
+  // Default to cheapest-first: that's what people comparing prices want.
+  const [sortAsc, setSortAsc] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
-  const placeholder = useCyclingPlaceholder(PLACEHOLDERS);
 
   const { data: searchResponse, isLoading, isError } = useSearchProducts(query, activeStore);
-  const results = searchResponse?.results ?? [];
+  const rawResults = searchResponse?.results ?? [];
   const searchWarning = searchResponse?.warning ?? null;
+
+  // Sort by price (products with no/zero price sink to the bottom).
+  const results = useMemo(() => {
+    const withPrice = rawResults.filter((p) => p.price > 0);
+    const noPrice = rawResults.filter((p) => !(p.price > 0));
+    withPrice.sort((a, b) => (sortAsc ? a.price - b.price : b.price - a.price));
+    return [...withPrice, ...noPrice];
+  }, [rawResults, sortAsc]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -119,27 +127,12 @@ export function SearchDashboard() {
           <span className="text-[#00913f]">Ofertas Reales</span> en Chile
         </h1>
         <p className="mt-2 text-center text-sm text-muted-foreground">
-          Busca en Lider, Jumbo, Santa Isabel, Tottus, Acuenta y Unimarc al mismo tiempo
+          Compara precios en Lider, Jumbo y Santa Isabel al mismo tiempo
         </p>
 
         {/* Search bar */}
         <form onSubmit={handleSubmit} className="mt-6 flex gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              ref={inputRef}
-              type="search"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={placeholder}
-              className={cn(
-                "h-12 w-full rounded-xl border border-border bg-[#f8f9fa] pl-10 pr-4",
-                "text-sm text-foreground placeholder:text-muted-foreground",
-                "focus:border-[#00913f] focus:outline-none focus:ring-2 focus:ring-[#00913f]/20",
-                "transition-all duration-200"
-              )}
-            />
-          </div>
+          <CyclingInput inputRef={inputRef} value={draft} onChange={setDraft} />
           <Button
             type="submit"
             className="h-12 rounded-xl px-6 text-sm font-semibold"
@@ -151,7 +144,7 @@ export function SearchDashboard() {
 
         {/* Store switcher */}
         <div className="mt-4 flex justify-center">
-          <StoreTabs />
+          <StoreTabs variant="light" />
         </div>
 
         {/* Recent queries */}
@@ -170,42 +163,6 @@ export function SearchDashboard() {
           </div>
         )}
       </section>
-
-      {/* ── Feature cards (Knasta-style) — only shown without results ── */}
-      {!hasResults && !isLoading && !query && (
-        <section>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {FEATURE_CARDS.map((card) => (
-              <button
-                key={card.title}
-                onClick={() => fireQuery(card.q)}
-                className="group flex flex-col items-start gap-2 rounded-xl border border-border bg-white p-4 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
-              >
-                <div
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-xl"
-                  style={{ background: `${card.color}18` }}
-                >
-                  {card.icon}
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-[#1a2332] group-hover:text-[#00913f] transition-colors">
-                    {card.title}
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
-                    {card.desc}
-                  </p>
-                </div>
-                <span
-                  className="mt-auto text-xs font-semibold"
-                  style={{ color: card.color }}
-                >
-                  Ver ofertas →
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* ── Category pills ─────────────────────────────────────── */}
       {!hasResults && !isLoading && !query && (
@@ -238,12 +195,29 @@ export function SearchDashboard() {
                   en {activeStore.replace("_", " ").toUpperCase()}
                 </p>
               </div>
-              <button
-                onClick={() => { setQuery(""); setDraft(""); }}
-                className="text-xs text-muted-foreground hover:text-foreground"
-              >
-                Limpiar ✕
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Sort by price toggle */}
+                {hasResults && (
+                  <button
+                    onClick={() => setSortAsc((v) => !v)}
+                    className="flex items-center gap-1 rounded-lg border border-border bg-white px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-[#00913f] hover:text-[#00913f]"
+                    title={sortAsc ? "Mostrando del más barato al más caro" : "Mostrando del más caro al más barato"}
+                  >
+                    {sortAsc ? (
+                      <ArrowUpNarrowWide className="h-3.5 w-3.5" />
+                    ) : (
+                      <ArrowDownNarrowWide className="h-3.5 w-3.5" />
+                    )}
+                    {sortAsc ? "Más barato" : "Más caro"}
+                  </button>
+                )}
+                <button
+                  onClick={() => { setQuery(""); setDraft(""); }}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Limpiar ✕
+                </button>
+              </div>
             </div>
           )}
 

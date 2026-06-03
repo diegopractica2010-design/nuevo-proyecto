@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { ProductCard } from "./product-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Product } from "@/types/api";
@@ -39,7 +40,10 @@ export function ProductGrid({
     );
   }
 
-  const minPrice = Math.min(...products.filter((p) => p.price > 0).map((p) => p.price));
+  const minPrice = useMemo(
+    () => products.reduce((min, p) => (p.price > 0 && p.price < min ? p.price : min), Infinity),
+    [products]
+  );
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

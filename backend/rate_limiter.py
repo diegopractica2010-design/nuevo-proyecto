@@ -36,18 +36,24 @@ class RateLimiter:
     def _connect(self):
         """Connect to Redis with error handling."""
         try:
-            # Parse Redis URL
+            # Parse Redis URL. Short timeouts so a dead Redis fails fast instead
+            # of blocking every request for seconds.
             pool = redis.ConnectionPool.from_url(
                 self.redis_url,
                 decode_responses=True,
-                socket_connect_timeout=5,
+                socket_connect_timeout=1,
+                socket_timeout=1,
                 socket_keepalive=True,
-                retry_on_timeout=True,
+                retry_on_timeout=False,
             )
-            self.redis_client = redis.Redis(connection_pool=pool)
-            self.redis_client.ping()
+            client = redis.Redis(connection_pool=pool)
+            client.ping()
+            self.redis_client = client
             logger.info("Rate limiter connected to Redis")
         except Exception as e:
+            # Leave redis_client as None so _check_limit short-circuits and rate
+            # limiting degrades gracefully without hitting the dead server again.
+            self.redis_client = None
             logger.error(f"Failed to connect to Redis: {e}. Rate limiting DISABLED.")
     
     def _get_client_key(self, client_id: str) -> str:

@@ -14,6 +14,31 @@ function getAuthHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// The backend returns errors in two shapes: FastAPI's `{ detail }` (string or
+// array) and a custom validation envelope `{ message, details: { fields } }`.
+// Pull the most useful human-readable message out of either one.
+function extractErrorMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const p = payload as Record<string, unknown>;
+
+  // Custom validation handler: { message, details: { fields: [{ field, message }] } }
+  const details = p.details as { fields?: Array<{ message?: string }> } | undefined;
+  if (details?.fields?.length) {
+    const msgs = details.fields.map((f) => f.message).filter(Boolean);
+    if (msgs.length) return msgs.join(" · ");
+  }
+
+  // FastAPI default: detail can be a string or an array of { msg }
+  if (typeof p.detail === "string") return p.detail;
+  if (Array.isArray(p.detail)) {
+    const msgs = p.detail.map((d) => (d as { msg?: string })?.msg).filter(Boolean);
+    if (msgs.length) return msgs.join(" · ");
+  }
+
+  if (typeof p.message === "string") return p.message;
+  return null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -27,7 +52,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw new Error(payload?.detail ?? `Request failed with ${response.status}`);
+    throw new Error(extractErrorMessage(payload) ?? `Request failed with ${response.status}`);
   }
 
   // 204 No Content or empty body — skip JSON parsing
@@ -40,7 +65,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const apiClient = {
-  searchProducts({ query, store, limit = 48 }: SearchParams) {
+  searchProducts({ query, store, limit = 12 }: SearchParams) {
     const params = new URLSearchParams({ q: query, store, limit: String(limit) });
     return request<SearchResponse>(`/search?${params.toString()}`);
   },

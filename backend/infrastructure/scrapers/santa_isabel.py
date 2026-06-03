@@ -30,20 +30,108 @@ class SantaIsabelScraper(BaseScraper):
         url = SANTA_ISABEL_SEARCH_URL.format(query=quote_plus(normalized))
         assert_live_store_access_allowed("santa_isabel", url, purpose="search")
 
-        # Estrategia 1: VTEX API pública (sin auth)
+        # Estrategia 1: BFF catalog/plp (mismo endpoint que usa el sitio, con apiKey)
+        try:
+            return await self._try_bff_api(normalized, limit)
+        except NoResultsError:
+            raise
+        except Exception as exc:
+            logger.warning("Santa Isabel BFF API failed: %s", exc)
+
+        # Estrategia 2: VTEX API pública (sin auth) — fallback histórico
         try:
             return await self._try_vtex_api(normalized, limit)
         except Exception as exc:
             logger.warning("Santa Isabel VTEX API failed: %s", exc)
 
-        # Estrategia 2: __NEXT_DATA__ del HTML
+        # Estrategia 3: __NEXT_DATA__ del HTML
         try:
             return await self._try_next_data(normalized, url, limit)
         except Exception as exc:
             logger.warning("Santa Isabel __NEXT_DATA__ strategy failed: %s", exc)
 
-        # Cencosud catalog API requiere auth (401) — no intentar
-        raise NoResultsError(query, message="Santa Isabel: no se encontraron resultados (sitio requiere Playwright)")
+        raise NoResultsError(query, message="Santa Isabel: no se encontraron resultados")
+
+    async def _try_bff_api(self, query: str, limit: int) -> ScrapedSearchResult:
+        """Santa Isabel BFF — endpoint catalog/plp con apiKey pública del sitio."""
+        import httpx
+        from backend.config import (
+            REQUEST_TIMEOUT,
+            STORE_SSL_VERIFY,
+            SANTA_ISABEL_BFF_URL,
+            SANTA_ISABEL_API_KEY,
+            SANTA_ISABEL_STORE,
+        )
+
+        body = {
+            "store": SANTA_ISABEL_STORE,
+            "collections": [],
+            "fullText": query,
+            "brands": [],
+            "hideUnavailableItems": False,
+            "from": 0,
+            "to": max(1, limit),
+            "orderBy": "",
+            "selectedFacets": [],
+            "promotionalCards": False,
+            "sponsoredProducts": False,
+        }
+        headers = {
+            "apikey": SANTA_ISABEL_API_KEY,
+            "content-type": "application/json",
+            "Accept": "application/json",
+            "Origin": SANTA_ISABEL_BASE_URL,
+            "Referer": SANTA_ISABEL_BASE_URL + "/",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+            ),
+        }
+        async with httpx.AsyncClient(
+            timeout=REQUEST_TIMEOUT,
+            transport=httpx.AsyncHTTPTransport(verify=STORE_SSL_VERIFY, retries=2),
+        ) as client:
+            resp = await client.post(SANTA_ISABEL_BFF_URL, json=body, headers=headers)
+            resp.raise_for_status()
+
+        data = resp.json()
+        products_raw = data.get("products") or []
+        if not products_raw:
+            raise NoResultsError(query)
+
+        products = [self._normalize_bff(p) for p in products_raw[:limit]]
+        products = [p for p in products if p["price"] > 0]
+        if not products:
+            raise NoResultsError(query)
+
+        return ScrapedSearchResult(
+            query=query,
+            applied_query=query,
+            products=products,
+            source_url=SANTA_ISABEL_BFF_URL,
+            fetch_strategy="api",
+            parse_strategy="santaisabel_bff_plp",
+        )
+
+    def _normalize_bff(self, raw: dict) -> dict:
+        """Normaliza un producto del BFF catalog/plp de Santa Isabel."""
+        items = raw.get("items") or [{}]
+        item = items[0] if items else {}
+        price = item.get("price") or item.get("listPrice") or 0
+        list_price = item.get("listPrice") or 0
+        images = item.get("images") or []
+        slug = raw.get("slug") or ""
+        return {
+            "name": item.get("name") or raw.get("productName") or "",
+            "price": float(price),
+            "original_price": float(list_price) if list_price and list_price > price else None,
+            "brand": raw.get("brand") or "",
+            "image": images[0] if images else "",
+            "url": urljoin(SANTA_ISABEL_BASE_URL, f"/producto/{slug}") if slug else SANTA_ISABEL_BASE_URL,
+            "sku": str(item.get("skuId") or raw.get("productId") or ""),
+            "in_stock": bool(item.get("stock", True)),
+            "source": "santa_isabel",
+        }
 
     async def _try_next_data(self, query: str, url: str, limit: int) -> ScrapedSearchResult:
         import json  # stdlib — always available

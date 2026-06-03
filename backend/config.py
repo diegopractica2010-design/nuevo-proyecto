@@ -91,6 +91,15 @@ class Settings(BaseSettings):
     JUMBO_SEARCH_URL: str = "https://www.jumbo.cl/busqueda?ft={query}"
     JUMBO_PRODUCT_BASE_URL: str = "https://www.jumbo.cl"
     JUMBO_API_KEY: str = os.getenv("JUMBO_API_KEY", "")
+
+    # Santa Isabel BFF (catalog PLP). The apiKey is a public, non-secret key
+    # embedded in santaisabel.cl's frontend; overridable via env if it rotates.
+    SANTA_ISABEL_BFF_URL: str = "https://bff.santaisabel.cl/catalog/plp"
+    SANTA_ISABEL_API_KEY: str = os.getenv(
+        "SANTA_ISABEL_API_KEY", "be-reg-groceries-sisa-catalog-wdhhq5a2fken"
+    )
+    # Store/location code Santa Isabel's BFF requires in the request body.
+    SANTA_ISABEL_STORE: str = os.getenv("SANTA_ISABEL_STORE", "pedrofontova")
     
     REQUEST_TIMEOUT: int = int(os.getenv("REQUEST_TIMEOUT", "18"))
     STORE_SSL_VERIFY: bool = os.getenv("STORE_SSL_VERIFY", "false").lower() == "true"
@@ -274,6 +283,9 @@ PRODUCT_BASE_URL = settings.PRODUCT_BASE_URL
 JUMBO_SEARCH_URL = settings.JUMBO_SEARCH_URL
 JUMBO_PRODUCT_BASE_URL = settings.JUMBO_PRODUCT_BASE_URL
 JUMBO_API_KEY = settings.JUMBO_API_KEY
+SANTA_ISABEL_BFF_URL = settings.SANTA_ISABEL_BFF_URL
+SANTA_ISABEL_API_KEY = settings.SANTA_ISABEL_API_KEY
+SANTA_ISABEL_STORE = settings.SANTA_ISABEL_STORE
 REQUEST_TIMEOUT = settings.REQUEST_TIMEOUT
 MAX_RESULTS = settings.MAX_RESULTS
 AUTOCOMPLETE_LIMIT = settings.AUTOCOMPLETE_LIMIT

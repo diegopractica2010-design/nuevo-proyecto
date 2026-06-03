@@ -4,6 +4,7 @@ export interface StoreInfo {
   id: string;
   display_name: string;
   experimental: boolean;
+  available?: boolean;
   url?: string;
   logo_url?: string;
   description?: string;

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Lock, Loader2, Mail, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -102,6 +102,7 @@ export function AuthModal({ trigger }: { trigger?: React.ReactNode }) {
       </DialogTrigger>
 
       <DialogContent className="sm:max-w-sm">
+        <DialogTitle className="sr-only">Ingresar o crear cuenta</DialogTitle>
         <div className="flex flex-col gap-5">
           <ModalLogo />
 

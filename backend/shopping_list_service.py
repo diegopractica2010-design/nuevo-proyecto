@@ -13,8 +13,7 @@ from backend.application.use_cases.normalize_product import find_competitor_pric
 from backend.search_service import search_products
 
 
-from backend.store_adapters import STORE_ADAPTERS
-COMPARE_STORES = tuple(STORE_ADAPTERS.keys())
+from backend.store_adapters import comparable_stores
 
 UNIT_WORDS = {
     "kg",
@@ -271,13 +270,19 @@ def is_specific_query(query: str) -> bool:
     return bool(_unit_requirement(query)) or len(tokens) >= 2
 
 
-async def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int = 24) -> dict[str, Any]:
+async def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_store: int = 10) -> dict[str, Any]:
+    compare_stores = comparable_stores()
     indexed_items = list(enumerate(items))
     results_by_item: dict[int, list[dict[str, Any]]] = {index: [] for index, _ in indexed_items}
 
     async def compare_store(index: int, item: ShoppingListItem, store: str) -> tuple[int, dict[str, Any]]:
         try:
-            response = await _maybe_await(search_products(item.query, limit=limit_per_store, store=store))
+            # 10s caps the slow HTML stores (Lider's fallback chain can run 18-20s)
+            # while still letting well-formed single-word queries through (~6-8s).
+            response = await asyncio.wait_for(
+                _maybe_await(search_products(item.query, limit=limit_per_store, store=store)),
+                timeout=10,
+            )
             products = [_product_to_dict(product) for product in response.results]
             best_options = select_best_products(products, item.query)
             best_options = [_ensure_unit_price(product) for product in best_options]
@@ -307,7 +312,7 @@ async def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_stor
         *(
             compare_store(index, item, store)
             for index, item in indexed_items
-            for store in COMPARE_STORES
+            for store in compare_stores
         )
     )
     for index, store_result in store_results:
@@ -317,7 +322,7 @@ async def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_stor
     for index, item in indexed_items:
         store_results = sorted(
             results_by_item[index],
-            key=lambda result: COMPARE_STORES.index(result["store"]),
+            key=lambda result: compare_stores.index(result["store"]),
         )
 
         candidates = [

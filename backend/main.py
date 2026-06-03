@@ -273,6 +273,9 @@ def get_stores():
             "id": s.name,
             "display_name": s.display_name,
             "experimental": s.experimental,
+            # available = funciona por HTTP rápido. Las que requieren navegador
+            # headless no entregan resultados usables y se marcan no disponibles.
+            "available": not s.requires_playwright,
             "url": s.url,
             "logo_url": s.logo_url,
             "description": s.description,

@@ -13,12 +13,12 @@ import type { StoreId, StoreInfo } from "@/types/api";
 // ── All known stores (fallback while API loads) ────────────────────────────
 
 const FALLBACK_STORES: StoreInfo[] = [
-  { id: "lider",        display_name: "Lider",        experimental: false },
-  { id: "jumbo",        display_name: "Jumbo",        experimental: false },
-  { id: "santa_isabel", display_name: "Santa Isabel", experimental: true  },
-  { id: "acuenta",      display_name: "Acuenta",      experimental: true  },
-  { id: "tottus",       display_name: "Tottus",       experimental: true  },
-  { id: "unimarc",      display_name: "Unimarc",      experimental: true  },
+  { id: "lider",        display_name: "Lider",        experimental: false, available: true  },
+  { id: "jumbo",        display_name: "Jumbo",        experimental: false, available: true  },
+  { id: "santa_isabel", display_name: "Santa Isabel", experimental: false, available: true  },
+  { id: "acuenta",      display_name: "Acuenta",      experimental: true,  available: false },
+  { id: "tottus",       display_name: "Tottus",       experimental: true,  available: false },
+  { id: "unimarc",      display_name: "Unimarc",      experimental: true,  available: false },
 ];
 
 // ── Store color accents ────────────────────────────────────────────────────
@@ -81,39 +81,52 @@ function ThemeToggle() {
 
 // ── Store tabs (in header) ─────────────────────────────────────────────────
 
-export function StoreTabs() {
+export function StoreTabs({ variant = "dark" }: { variant?: "dark" | "light" }) {
   const activeStore = useAppStore((s) => s.activeStore);
   const setActiveStore = useAppStore((s) => s.setActiveStore);
   const { data: stores = FALLBACK_STORES } = useQuery({
     queryKey: ["stores"],
     queryFn: () => apiClient.getStores(),
-    staleTime: 5 * 60 * 1000,   // 5 min (not Infinity, so it retries)
+    staleTime: 5 * 60 * 1000,
     retry: 3,
   });
+
+  const isDark = variant === "dark";
 
   return (
     <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
       {stores.map((s) => {
         const active = activeStore === s.id;
         const color = STORE_COLORS[s.id] ?? "#00913f";
+        const unavailable = s.available === false;
         return (
           <button
             key={s.id}
             onClick={() => setActiveStore(s.id as StoreId)}
+            title={unavailable ? "Tienda en desarrollo — puede no devolver resultados" : undefined}
             className={cn(
               "flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-all duration-150",
-              active
-                ? "bg-white text-[#1a2332] shadow-sm"
-                : "text-white/70 hover:bg-white/10 hover:text-white"
+              isDark
+                ? active ? "bg-white shadow-sm" : "hover:bg-white/10"
+                : active ? "bg-[#f0f1f3] shadow-sm" : "hover:bg-[#f0f1f3]",
+              unavailable && !active && "opacity-50"
             )}
-            style={active ? { color: color } : undefined}
+            style={{
+              color: active
+                ? color
+                : isDark ? "rgba(255,255,255,0.70)" : "#6b7280",
+            }}
           >
-            {/* Color dot */}
             <span
               className="inline-block h-2 w-2 rounded-full shrink-0"
               style={{ background: color }}
             />
             {s.display_name}
+            {unavailable && (
+              <span className="rounded-full bg-amber-400/20 px-1 py-px text-[8px] font-bold uppercase tracking-wide text-amber-600">
+                pronto
+              </span>
+            )}
           </button>
         );
       })}
