@@ -30,12 +30,66 @@ from backend.models import (
 )
 from backend.request_context import get_request_id
 from backend.scraper import normalize_query
+from backend.domain.constants import QUERY_STOPWORDS
 from backend.store_adapters import get_store_adapter
 
 
 logger = logging.getLogger(__name__)
 DB_FRESH_TTL = timedelta(hours=1)
 DB_STALE_TTL = timedelta(hours=24)
+
+# ponytail: palabras de marketing/formato que los supermercados no indexan bien.
+# Quitarlas convierte "Yoghurt Batido Zero lacto Sabor Vainilla Potenciaco" en
+# "yoghurt batido vainilla", que sí encuentra resultados.
+_FILLER_WORDS = {
+    "sabor", "tradicional", "postre", "premium", "original", "clasico", "clasica",
+    "familiar", "potenciaco", "potenciado", "grado", "grano", "largo", "corto",
+    "ancho", "buen", "descanso", "germen", "trigo", "ropa", "blanca", "color",
+    "xtra", "white", "extra", "un", "unidades", "unidad", "pote", "bolsa", "caja",
+    "botella", "bidon", "frasco", "lata", "sachet", "doypack", "pack", "envase",
+    "kg", "kilo", "kilos", "g", "gr", "gramos", "gramo", "l", "lt", "lts", "litro",
+    "litros", "ml", "cc",
+}
+
+# ponytail: español chileno de supermercado; si un término no encuentra, probamos
+# el sinónimo (y viceversa) para no perder el producto.
+_CHILE_SYNONYMS = {
+    "choclo": "maiz", "poroto": "frejol", "palta": "aguacate",
+    "betarraga": "remolacha", "zapallo": "calabaza", "durazno": "melocoton",
+    "damasco": "albaricoque", "frutilla": "fresa",
+}
+
+
+def _search_variants(normalized_query: str) -> list[str]:
+    """Variantes de la búsqueda, de más específica a más general (incluye términos chilenos)."""
+    tokens = normalized_query.split()
+    essential = [
+        token
+        for token in tokens
+        if token not in _FILLER_WORDS
+        and token not in QUERY_STOPWORDS
+        and not token.isdigit()
+        and len(token) > 1
+    ]
+    variants: list[str] = []
+    seen = {normalized_query.lower()}
+
+    def add(value: str) -> None:
+        cleaned = " ".join(value.split())
+        if cleaned and cleaned.lower() not in seen:
+            seen.add(cleaned.lower())
+            variants.append(cleaned)
+
+    if essential:
+        add(" ".join(essential))
+    if len(essential) > 3:
+        add(" ".join(essential[:3]))
+    if len(essential) >= 2:
+        add(" ".join(essential[:2]))
+    synonym_tokens = [_CHILE_SYNONYMS.get(token, token) for token in essential[:3]]
+    if synonym_tokens != essential[:3]:
+        add(" ".join(synonym_tokens))
+    return variants[:4]
 
 
 class SearchServiceError(RuntimeError):
@@ -251,6 +305,18 @@ async def search_products(query: str, limit: int = MAX_RESULTS, store: str = "li
     logger.info("Ejecutando busqueda en vivo para query=%s, store=%s", normalized_query, store)
     try:
         results = await _maybe_await(adapter.search(normalized_query, limit))
+        # ponytail: si la query completa no encuentra, probar formas más simples
+        # y sinónimos chilenos hasta dar con resultados.
+        if not (results and results.products):
+            for variant in _search_variants(normalized_query):
+                try:
+                    alt = await _maybe_await(adapter.search(variant, limit))
+                except Exception:
+                    continue
+                if alt and alt.products:
+                    logger.info("Variante '%s' encontró resultados para '%s'", variant, normalized_query)
+                    results = alt
+                    break
         if results and results.products:
             response = _build_response_from_scrape(
                 query=normalized_query,

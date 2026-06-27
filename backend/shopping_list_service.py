@@ -186,12 +186,15 @@ def score_product_for_query(product: dict[str, Any], query: str) -> int:
     if _has_charcoal_intent(query):
         score += 35 if _is_charcoal_product(haystack) else -80
 
-    # ponytail: si pides "sin azúcar"/"0%"/"integral", castiga fuerte el producto normal.
+    # ponytail: premia el producto con el atributo pedido (sin azúcar/integral). No
+    # castiga al normal: si no existe el especial, select_best_products lo deja como
+    # alternativa (fallback). Aquí solo ordena: el especial queda arriba.
     product_text_raw = " ".join(
         str(product.get(key) or "") for key in ("name", "brand", "category", "seller")
     )
     for attribute in _required_attributes(query):
-        score += 30 if _has_attribute(product_text_raw, attribute) else -60
+        if _has_attribute(product_text_raw, attribute):
+            score += 30
 
     # ponytail: si pides una marca (ej. Pepsodent), premia esa marca y castiga otras.
     query_brand = canonicalize(query).brand
@@ -279,6 +282,24 @@ def select_best_products(products: list[dict[str, Any]], query: str) -> list[dic
                 filtered.append(product)
         scored = filtered
 
+    # ponytail: si pides un atributo (sin azúcar / integral), usa SOLO los que lo
+    # tienen; pero si ninguno lo tiene, deja los normales como alternativa.
+    required_attrs = _required_attributes(query)
+    if required_attrs:
+        with_attr = [
+            product
+            for product in scored
+            if all(
+                _has_attribute(
+                    " ".join(str(product.get(k) or "") for k in ("name", "brand", "category", "seller")),
+                    attribute,
+                )
+                for attribute in required_attrs
+            )
+        ]
+        if with_attr:
+            scored = with_attr
+
     unit = _unit_requirement(query)
     if unit:
         scored = [
@@ -347,9 +368,14 @@ async def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_stor
                 "error": "Tienda sin API pública disponible (no se puede leer su catálogo)",
             }
         try:
-            # ponytail: las tiendas de navegador (Playwright) tardan 5-40s; les damos
-            # más tiempo. Las rápidas por API siguen con 10s.
-            timeout = 45 if (adapter and adapter.requires_playwright) else 10
+            # ponytail: Líder tiene cadena de fallback lenta (18-20s) y ahora puede
+            # reintentar variantes; le damos 25s. Las demás por API, 15s.
+            if adapter and adapter.requires_playwright:
+                timeout = 45
+            elif store == "lider":
+                timeout = 25
+            else:
+                timeout = 15
             response = await asyncio.wait_for(
                 _maybe_await(search_products(item.query, limit=limit_per_store, store=store)),
                 timeout=timeout,
@@ -379,9 +405,21 @@ async def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_stor
                 "error": str(exc),
             }
 
+    # ponytail: Lider rechaza varias búsquedas casi simultáneas (anti-bot). Le damos
+    # un carril propio de solo 2 a la vez; las demás tiendas (API) van con 8.
+    semaphore = asyncio.Semaphore(8)
+    lider_semaphore = asyncio.Semaphore(1)
+
+    async def compare_store_limited(index: int, item: ShoppingListItem, store: str):
+        async with semaphore:
+            if store == "lider":
+                async with lider_semaphore:
+                    return await compare_store(index, item, store)
+            return await compare_store(index, item, store)
+
     store_results = await asyncio.gather(
         *(
-            compare_store(index, item, store)
+            compare_store_limited(index, item, store)
             for index, item in indexed_items
             for store in compare_stores
         )
@@ -488,6 +526,11 @@ def parse_shopping_items(payload_items: list[Any]) -> list[ShoppingListItem]:
         query = re.sub(r"\s+", " ", query).strip()
         if not query:
             continue
+        # ponytail: quita la cantidad inicial ("2 Queso..." -> "Queso...") salvo que
+        # sea peso ("1 kg Pollo"); el número ensucia la búsqueda y rompe los enlaces de Lider.
+        amount_match = re.match(r"^(\d+)\s+(.+)$", query)
+        if amount_match and amount_match.group(2).split()[0].lower() not in UNIT_WORDS:
+            query = amount_match.group(2)
         for expanded in _expand_flavor_list(query):
             key = expanded.lower()
             if not expanded or key in seen:
