@@ -140,15 +140,11 @@ def list_stores() -> list[StoreAdapter]:
 
 
 def comparable_stores() -> tuple[str, ...]:
-    """Stores usable in a multi-store comparison.
+    """Todas las tiendas conocidas para la comparación de lista.
 
-    Only fast HTTP-API stores are included. Playwright-backed stores launch a
-    headless browser per query (5-40s each); running them across a multi-item
-    shopping list would make the compare unusably slow, so they are excluded
-    here and remain available only in the single-store search.
+    Se listan las 6. Las que requieren navegador (Tottus/Unimarc/Acuenta) no
+    tienen API pública estable, así que se marcan "no disponible" en
+    compare_store sin gastar llamadas de red (degradación elegante).
     """
-    return tuple(
-        name
-        for name, adapter in STORE_ADAPTERS.items()
-        if not adapter.requires_playwright
-    )
+    # ponytail: mostrar las 6 tiendas; la degradación de las frágiles vive en compare_store.
+    return tuple(STORE_ADAPTERS.keys())

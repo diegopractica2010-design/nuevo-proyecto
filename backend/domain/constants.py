@@ -24,6 +24,18 @@ QUERY_STOPWORDS: frozenset[str] = frozenset(
         "unas",
         "unos",
         "y",
+        # ponytail: palabras de envase/formato; describen el empaque, no el producto,
+        # así que no deben bloquear el match (caso "Detergente Líquido Bidón").
+        "bidon",
+        "botella",
+        "caja",
+        "envase",
+        "frasco",
+        "lata",
+        "pote",
+        "sachet",
+        "tarro",
+        "doypack",
     }
 )
 

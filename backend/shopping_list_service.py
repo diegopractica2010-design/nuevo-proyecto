@@ -7,13 +7,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.domain.constants import CHARCOAL_TERMS, QUERY_STOPWORDS
-from backend.domain.normalization.matching import canonicalize
+from backend.domain.normalization.matching import canonicalize, PRODUCT_TYPES
 from backend.domain.normalization.text import normalize_text
 from backend.application.use_cases.normalize_product import find_competitor_price
 from backend.search_service import search_products
 
 
-from backend.store_adapters import comparable_stores
+from backend.config import get_settings
+from backend.store_adapters import comparable_stores, get_store_adapter
 
 UNIT_WORDS = {
     "kg",
@@ -85,6 +86,9 @@ def _word_matches(token: str, words: set[str]) -> bool:
 
 def _unit_requirement(query: str) -> str | None:
     text = normalize_compare_text(query)
+    # ponytail: lo a granel se vende por peso variable; no exigir "1kg" en el nombre.
+    if "granel" in text:
+        return None
     if re.search(r"\b(1|uno|una)\s*(kg|kilo|kilos|kilogramo|kilogramos)\b", text):
         return "1kg"
     if re.search(r"\b1000\s*(g|gr|gramo|gramos)\b", text):
@@ -109,6 +113,28 @@ def _matches_unit(product_text: str, unit: str | None) -> bool:
             re.search(r"\b1\s*(l|lt|lts|litro)\b", product_text)
             or re.search(r"\b1000\s*(ml|cc)\b", product_text)
         )
+    return True
+
+
+# ponytail: atributos que cambian el producto; si los pides, el resultado debe tenerlos.
+def _required_attributes(query: str) -> list[str]:
+    raw = str(query or "").lower()
+    text = normalize_compare_text(query)
+    found: list[str] = []
+    if "sin az" in text or "0%" in raw or "light" in text or "diet" in text or "zero" in text:
+        found.append("sin-azucar")
+    if "integral" in text:
+        found.append("integral")
+    return found
+
+
+def _has_attribute(product_text_raw: str, attribute: str) -> bool:
+    raw = product_text_raw.lower()
+    text = normalize_compare_text(product_text_raw)
+    if attribute == "sin-azucar":
+        return "sin az" in text or "0%" in raw or "light" in text or "diet" in text or "zero" in text
+    if attribute == "integral":
+        return "integral" in text
     return True
 
 
@@ -160,6 +186,22 @@ def score_product_for_query(product: dict[str, Any], query: str) -> int:
     if _has_charcoal_intent(query):
         score += 35 if _is_charcoal_product(haystack) else -80
 
+    # ponytail: si pides "sin azúcar"/"0%"/"integral", castiga fuerte el producto normal.
+    product_text_raw = " ".join(
+        str(product.get(key) or "") for key in ("name", "brand", "category", "seller")
+    )
+    for attribute in _required_attributes(query):
+        score += 30 if _has_attribute(product_text_raw, attribute) else -60
+
+    # ponytail: si pides una marca (ej. Pepsodent), premia esa marca y castiga otras.
+    query_brand = canonicalize(query).brand
+    if query_brand:
+        product_brand = canonicalize(product_text_raw).brand
+        if product_brand == query_brand:
+            score += 25
+        elif product_brand is not None:
+            score -= 40
+
     if product.get("in_stock"):
         score += 4
 
@@ -203,14 +245,27 @@ def _ensure_unit_price(product: dict[str, Any] | None) -> dict[str, Any] | None:
     return product
 
 
+# ponytail: el "núcleo" de la búsqueda es el TIPO de producto. Filtramos por él, no
+# por cada palabra descriptiva, para que "Arroz Integral Grado 1 Grano Largo Bolsa"
+# igual encuentre "Arroz Integral". Sabor/marca/atributos afinan el puntaje, no descartan.
+def _core_terms(query: str) -> set[str]:
+    product = canonicalize(query)
+    type_key = product.canonical_name.split(":")[0] if product.canonical_name else ""
+    aliases = PRODUCT_TYPES.get(type_key)
+    if aliases:
+        return set(aliases)
+    tokens = _query_tokens(query)
+    return {max(tokens, key=len)} if tokens else set()
+
+
 def select_best_products(products: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
     scored = [
         {**product, "_match_score": score_product_for_query(product, query)}
         for product in products
         if product.get("price") is not None
     ]
-    required_tokens = [token for token in _query_tokens(query) if len(token) >= 4]
-    if required_tokens:
+    core = _core_terms(query)
+    if core:
         filtered = []
         for product in scored:
             haystack = normalize_compare_text(
@@ -219,8 +274,8 @@ def select_best_products(products: list[dict[str, Any]], query: str) -> list[dic
                     for key in ("name", "brand", "category", "seller")
                 )
             )
-            words = set(haystack.split())
-            if all(_word_matches(token, words) for token in required_tokens):
+            words = {_canonical_token(word) for word in haystack.split()}
+            if any(_word_matches(term, words) for term in core):
                 filtered.append(product)
         scored = filtered
 
@@ -276,12 +331,28 @@ async def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_stor
     results_by_item: dict[int, list[dict[str, Any]]] = {index: [] for index, _ in indexed_items}
 
     async def compare_store(index: int, item: ShoppingListItem, store: str) -> tuple[int, dict[str, Any]]:
+        adapter = get_store_adapter(store)
+        # ponytail: las tiendas sin API pública (Tottus/Unimarc/Acuenta) se marcan
+        # "no disponible" al instante, sin gastar llamadas de red que fallarían.
+        if adapter and adapter.requires_playwright and not get_settings().PLAYWRIGHT_ENABLED:
+            return index, {
+                "store": store,
+                "count": 0,
+                "matched_count": 0,
+                "best": None,
+                "alternatives": [],
+                "warning": None,
+                "applied_query": item.query,
+                "unavailable": True,
+                "error": "Tienda sin API pública disponible (no se puede leer su catálogo)",
+            }
         try:
-            # 10s caps the slow HTML stores (Lider's fallback chain can run 18-20s)
-            # while still letting well-formed single-word queries through (~6-8s).
+            # ponytail: las tiendas de navegador (Playwright) tardan 5-40s; les damos
+            # más tiempo. Las rápidas por API siguen con 10s.
+            timeout = 45 if (adapter and adapter.requires_playwright) else 10
             response = await asyncio.wait_for(
                 _maybe_await(search_products(item.query, limit=limit_per_store, store=store)),
-                timeout=10,
+                timeout=timeout,
             )
             products = [_product_to_dict(product) for product in response.results]
             best_options = select_best_products(products, item.query)
@@ -386,6 +457,20 @@ async def compare_shopping_list(items: list[ShoppingListItem], *, limit_per_stor
     }
 
 
+# ponytail: "Jaleas (Frambuesa, Piña, Guinda)" son 3 productos distintos; una sola
+# regex expande cada sabor a su propia búsqueda en vez de buscar todo junto.
+def _expand_flavor_list(query: str) -> list[str]:
+    match = re.search(r"\(([^)]*)\)", query)
+    if not match:
+        return [query]
+    base = query[: match.start()].strip()
+    flavors = [part.strip() for part in re.split(r"[,/]| y ", match.group(1)) if part.strip()]
+    if len(flavors) <= 1:
+        rest = match.group(1).strip()
+        return [re.sub(r"\s+", " ", f"{base} {rest}").strip()]
+    return [re.sub(r"\s+", " ", f"{base} {flavor}").strip() for flavor in flavors]
+
+
 def parse_shopping_items(payload_items: list[Any]) -> list[ShoppingListItem]:
     items: list[ShoppingListItem] = []
     seen: set[str] = set()
@@ -401,10 +486,13 @@ def parse_shopping_items(payload_items: list[Any]) -> list[ShoppingListItem]:
             continue
 
         query = re.sub(r"\s+", " ", query).strip()
-        key = query.lower()
-        if not query or key in seen:
+        if not query:
             continue
-        seen.add(key)
-        items.append(ShoppingListItem(query=query, quantity=max(1, quantity)))
+        for expanded in _expand_flavor_list(query):
+            key = expanded.lower()
+            if not expanded or key in seen:
+                continue
+            seen.add(key)
+            items.append(ShoppingListItem(query=expanded, quantity=max(1, quantity)))
 
     return items

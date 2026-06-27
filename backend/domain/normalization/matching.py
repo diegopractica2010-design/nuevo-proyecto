@@ -65,7 +65,9 @@ PRODUCT_TYPES = {
     "arroz": {"arroz"},
     "leche": {"leche"},
     "aceite": {"aceite"},
-    "fideo": {"fideo", "fideos", "pasta", "tallarin", "tallarines", "spaghetti", "espagueti"},
+    # ponytail: se quitó "pasta" porque "pasta dental" se clasificaba como fideo;
+    # los fideos en Chile se nombran fideo/tallarin/spaghetti.
+    "fideo": {"fideo", "fideos", "tallarin", "tallarines", "spaghetti", "espagueti"},
     "azucar": {"azucar"},
     "harina": {"harina"},
     "sal": {"sal"},
@@ -112,6 +114,15 @@ PRODUCT_TYPES = {
     "mermelada": {"mermelada"},
     "conserva": {"conserva"},
     "carbon": {"carbon", "briqueta", "briquetas"},
+    # ponytail: tipos faltantes de la lista de compras; ampliar el diccionario, no agregar código.
+    "jalea": {"jalea", "jaleas"},
+    "gelatina": {"gelatina", "gelatinas"},
+    "bolsa-basura": {"basura"},
+    "ensalada": {"ensalada", "ensaladas"},
+    "choclo": {"choclo", "choclos"},
+    "infusion": {"infusion", "infusiones", "hierba", "hierbas", "manzanilla", "menta", "boldo", "cedron"},
+    "lechuga": {"lechuga", "lechugas"},
+    "zanahoria": {"zanahoria", "zanahorias"},
 }
 
 VARIANT_ALIASES = {
@@ -120,7 +131,8 @@ VARIANT_ALIASES = {
     "pregraneado": {"pregraneado", "pre graneado"},
     "grano-largo": {"grano largo", "largo"},
     "entera": {"entera", "entero"},
-    "descremada": {"descremada", "descremado", "0"},
+    # ponytail: se quitó "0" suelto; confundía "gelatina 0%" con leche descremada.
+    "descremada": {"descremada", "descremado"},
     "semidescremada": {"semidescremada", "semi descremada", "semidescremado"},
     "sin-lactosa": {"sin lactosa"},
     "maravilla": {"maravilla"},
