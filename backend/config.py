@@ -163,6 +163,16 @@ class Settings(BaseSettings):
     # FASE 4: PagerDuty integration
     PAGERDUTY_INTEGRATION_KEY: str = os.getenv("PAGERDUTY_INTEGRATION_KEY", "")
     
+    # IP Protection & Proxy Rotation (ANTIBOT)
+    PROXIES_LIST: str = os.getenv("PROXIES_LIST", "")
+    ANTIBOT_DELAY_MIN: float = float(os.getenv("ANTIBOT_DELAY_MIN", "0.5"))
+    ANTIBOT_DELAY_MAX: float = float(os.getenv("ANTIBOT_DELAY_MAX", "3.0"))
+    TRUSTED_PROXY_IPS: list[str] = (
+        [ip.strip() for ip in os.getenv("TRUSTED_PROXY_IPS", "").split(",") if ip.strip()]
+        if os.getenv("TRUSTED_PROXY_IPS")
+        else []
+    )
+    
     # Headers for scraping
     USER_AGENT: str = os.getenv(
         "USER_AGENT",
@@ -312,6 +322,10 @@ SENTRY_ENVIRONMENT = settings.SENTRY_ENVIRONMENT
 SENTRY_TRACE_SAMPLE_RATE = settings.SENTRY_TRACE_SAMPLE_RATE
 USER_AGENT = settings.USER_AGENT
 BROWSER_HEADERS = settings.BROWSER_HEADERS
+PROXIES_LIST = settings.PROXIES_LIST
+ANTIBOT_DELAY_MIN = settings.ANTIBOT_DELAY_MIN
+ANTIBOT_DELAY_MAX = settings.ANTIBOT_DELAY_MAX
+TRUSTED_PROXY_IPS = settings.TRUSTED_PROXY_IPS
 
 # FASE 4 exports
 BACKUP_ENABLED = settings.BACKUP_ENABLED
